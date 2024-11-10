@@ -107,14 +107,14 @@ class GeneralEngineSpider(scrapy.Spider):
                     self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
 
         collected_data = self.items_collected[url]
-        if self._is_data_complete(collected_data, structure):
+        if self._is_data_complete(collected_data, structure, response.url):
             if any(key != "url" for key in collected_data.keys()):
                 yield self.items_collected.pop(url)
             else:
                 self.items_collected.pop(url)
 
 
-    def _is_data_complete(self, collected_data, structure):
+    def _is_data_complete(self, collected_data, structure, url):
         for key, value in structure.items():
             if key.startswith("_") or key.startswith("@"):
                 continue
@@ -126,11 +126,11 @@ class GeneralEngineSpider(scrapy.Spider):
                 if key_base not in collected_data or not self._is_data_complete(collected_data.get(key_base, {}),
                                                                                 value):
                     if not is_optional:
-                        self.log(f"Required key '{key_base}' not in collected_data")
+                        self.log(f"Required key '{key_base}' not in collected_data for url {url}")
                         return False
             elif key_base not in collected_data:
                 if not is_optional:
-                    self.log(f"Required key '{key_base}' not in collected_data")
+                    self.log(f"Required key '{key_base}' not in collected_data for url {url}")
                     return False
 
         return True

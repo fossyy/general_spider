@@ -8,8 +8,8 @@
           "_element": "//div[contains(@class, 'structItem--thread')]//div[@class='structItem-title']/a/@href",
           "thread_label*": "//h1[@class='p-title-value']//span[contains(@class, 'label')]/text()",
           "thread_title": "//h1[@class='p-title-value']/text()[normalize-space()] | //h1[contains(@class, 'p-title-value')]/text()",
-          "thread_author": "(//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//h4[contains(@class, 'message-name')]//a/text()",
-          "thread_content": "(//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//div[@class='bbWrapper']/text()",
+          "thread_author": "((//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//h4[contains(@class, 'message-name')]//a/text() | (//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//h4[contains(@class, 'message-name')]//a/span/text() | (//div[contains(@class, 'p-body')]//article//*[contains(@class, 'username--staff') or contains(@class, 'username--moderator') or contains(@class, 'username--admin')])[1]/text())[1]",
+          "thread_content": "string((//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//div[@class='bbWrapper'])",
           "thread_media*": "(//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//div[@class='bbWrapper']//img/@src | (//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body') or contains(@class, 'message')])[1]//div[@class='bbWrapper']//video/source/@src",
           "_loop": {
             "_element": "//div[@class='block-body js-replyNewMessageContainer']//article//div[@class='message-inner']//div[contains(@class, 'message-main')]",

@@ -1,4 +1,6 @@
 import json
+from logging import exception
+
 import scrapy
 
 
@@ -51,22 +53,20 @@ class GeneralEngineSpider(scrapy.Spider):
             if key == "_element":
                 continue
 
-            if key == "_pagination":
-                pagination_xpath = value["_element"]
-                if pagination_xpath:
-                    next_page = response.xpath(pagination_xpath).get()
-                    if next_page:
-                        next_page_url = response.urljoin(next_page)
-                        self.log(f"Found pagination link: {next_page_url}")
-                        yield response.follow(
-                            url=next_page_url,
-                            callback=self.parse_structure,
-                            headers=self.headers,
-                            cb_kwargs={"structure": structure},
-                            meta={'proxy': self.get_proxy()}
-                        )
+            if "_pagination" in value:
+                next_page = response.xpath(value["_pagination"]).get()
+                if next_page:
+                    next_page_url = response.urljoin(next_page)
+                    self.log(f"Following pagination to: {next_page_url}")
+                    yield response.follow(
+                        url=next_page_url,
+                        callback=self.parse_structure,
+                        headers=self.headers,
+                        cb_kwargs={"structure": structure},
+                        meta={'proxy': self.get_proxy()}
+                    )
 
-            elif key == "_list":
+            if key == "_list":
                 list_xpath = value["_element"]
                 if list_xpath:
                     links = response.xpath(list_xpath).getall()
@@ -105,14 +105,17 @@ class GeneralEngineSpider(scrapy.Spider):
 
                 if extracted_data:
                     self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
-
-        collected_data = self.items_collected[url]
-        if self._is_data_complete(collected_data, structure, response.url):
-            if any(key != "url" for key in collected_data.keys()):
-                yield self.items_collected.pop(url)
-            else:
-                self.items_collected.pop(url)
-
+        try:
+            collected_data = self.items_collected[url]
+            if self._is_data_complete(collected_data, structure, response.url):
+                if any(key != "url" for key in collected_data.keys()):
+                    yield self.items_collected.pop(url)
+                else:
+                    self.items_collected.pop(url)
+        except KeyError:
+            pass
+        except Exception as e:
+            self.logger.exception(e)
 
     def _is_data_complete(self, collected_data, structure, url):
         for key, value in structure.items():

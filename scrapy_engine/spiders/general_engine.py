@@ -89,7 +89,14 @@ class GeneralEngineSpider(scrapy.Spider):
                 for element in loop_elements:
                     data = {}
                     for loop_key in loop_keys:
-                        data[loop_key if loop_key[len(loop_key) - 1] != "*" else loop_key[:len(loop_key) - 1]] = element.xpath(value[loop_key]).get()
+                        extracted_data = element.xpath(value[loop_key]).getall()
+                        stripped_data = [item.strip() for item in extracted_data if item.strip()]
+                        if len(stripped_data) == 1:
+                            extracted_data = element.xpath(value[loop_key]).get()
+
+                        if extracted_data:
+                            data[loop_key if loop_key[len(loop_key) - 1] != "*" else loop_key[:len(loop_key) - 1]] = extracted_data
+
                     result.append(data)
 
                 self.items_collected[url]["_loop" if value["_key"] is None else value["_key"]] = result
@@ -132,6 +139,11 @@ class GeneralEngineSpider(scrapy.Spider):
                         self.log(f"Required key '{key_base}' not in collected_data for url {url}")
                         return False
             elif key_base not in collected_data:
+                if not is_optional:
+                    self.log(f"Required key '{key_base}' not in collected_data for url {url}")
+                    return False
+
+            elif collected_data[key_base] is None:
                 if not is_optional:
                     self.log(f"Required key '{key_base}' not in collected_data for url {url}")
                     return False

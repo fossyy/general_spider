@@ -1,0 +1,24 @@
+{
+  "base_url": "http://stormer5v52vjsw66jmds7ndeecudq444woadhzr2plxlaayexnh6eqd.onion",
+  "structure": {
+    "@landing_page": {
+      "_list": {
+        "_element": "//div[@class='top-nav']//ul[@id='menu-main']//a/@href",
+        "@news_listing": {
+          "_list": {
+            "_element": "//div[@class='post-listing archive-box']//h2[@class='post-box-title']//a/@href",
+            "_pagination": "//div[@class='pagination']//span[@id='tie-next-page']//a/@href",
+            "@news_article": {
+              "news_title": "string(//div[@class='post-inner']//h1)",
+              "news_author": "string(//div[@class='post-inner']//span[@class='post-meta-author'])",
+              "news_release_date": "string(//div[@class='post-inner']//span[@class='tie-date'])",
+              "news_media*": "//div[@class='post-inner']//img/@src | //div[@class='post-inner']//video/source/@src",
+              "news_external_source*": "//div[@class='post-inner']//iframe/@src",
+              "news_content": "string(//div[@class='post-inner'])"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "base_url": "http://kerberosemtkeqh7pznmv3negqhudxk5po3awdazx5fqgizttr6xeiid.onion/home/",
+  "cookies": {
+    "ksgn": "98AA8B7EB80EAE378FB781101E0CC98B6F72CE7B9C0A1B30C8BB754A6240429991FD025725A803FF0C8DA7CCCF18374F5735129953CD4970CDFC26961E09B56A0ABB8B3169668061C40ADBDDA837B7E7",
+    "ksme": "g9fl29hqbg6k15lvpdpkodvdt5dkvivkk8"
+  },
+  "structure": {
+    "@landing_page": {
+      "_list": {
+        "_element": "(//div[@id='menu-cats']//a/@href)[1]",
+        "@products_list": {
+          "_list": {
+            "_element": "//div[@id='content']//div[@class='item-block']//div[@class='ae zx300']/div/a/@href",
+            "@product_page": {
+              "product_description": "string((//div[@id='content']//div[@class='re'])[4])",
+              "product_category": "string((//div[@id='content']//div[@class='item-detail']//div[@class='ae-ov'])[1])"
+            }
+          }
+        }
+      }
+    }
+  }
+}

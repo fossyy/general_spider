@@ -1,8 +1,5 @@
-import json
-from logging import exception
-
+import requests
 import scrapy
-
 
 class GeneralEngineSpider(scrapy.Spider):
     name = "general_engine"
@@ -29,17 +26,25 @@ class GeneralEngineSpider(scrapy.Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
+
     def __init__(self, config_path=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        with open(config_path, 'r') as file:
-            self.config = json.load(file)
+        try:
+            response = requests.get(f"http://0.0.0.0:8080/config/{config_path}")
+            response.raise_for_status()
+            self.config = response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching JSON from 'http://0.0.0.0:8080/config/{config_path}': {e}")
+        print(f"config path : {config_path}")
         self.items_collected = {}
+        self.cookies = self.config.get('cookies', {})
 
     def start_requests(self):
         yield scrapy.Request(
             url=self.config['base_url'],
             callback=self.parse_structure,
             headers=self.headers,
+            cookies=self.cookies,
             cb_kwargs={"structure": self.config["structure"]},
             meta={'proxy': self.get_proxy()}
         )
@@ -62,6 +67,7 @@ class GeneralEngineSpider(scrapy.Spider):
                         url=next_page_url,
                         callback=self.parse_structure,
                         headers=self.headers,
+                        cookies=self.cookies,
                         cb_kwargs={"structure": structure},
                         meta={'proxy': self.get_proxy()}
                     )
@@ -77,29 +83,54 @@ class GeneralEngineSpider(scrapy.Spider):
                             url=link_url,
                             callback=self.parse_structure,
                             headers=self.headers,
+                            cookies=self.cookies,
                             cb_kwargs={"structure": value},
                             meta={'proxy': self.get_proxy()}
                         )
 
+
             elif key == "_loop":
                 loop_elements = response.xpath(value["_element"])
-                loop_keys = [k for k in value.keys() if k not in ["_element", "_key"]]
-
+                loop_keys = [k for k in value.keys() if k not in ["_element", "_key", "_pagination"]]
                 result = []
                 for element in loop_elements:
                     data = {}
                     for loop_key in loop_keys:
-                        extracted_data = element.xpath(value[loop_key]).getall()
-                        stripped_data = [item.strip() for item in extracted_data if item.strip()]
-                        if len(stripped_data) == 1:
-                            extracted_data = element.xpath(value[loop_key]).get()
+                        if isinstance(loop_key, str):
+                            if isinstance(value[loop_key], str):
+                                extracted_data = element.xpath(value[loop_key]).getall()
+                                stripped_data = [item.strip() for item in extracted_data if item.strip()]
+                                if len(stripped_data) == 1:
+                                    extracted_data = element.xpath(value[loop_key]).get()
+                                if extracted_data:
+                                    data[loop_key.rstrip("*")] = extracted_data
+                                else:
+                                    is_optional = loop_key.endswith("*")
 
-                        if extracted_data:
-                            data[loop_key if loop_key[len(loop_key) - 1] != "*" else loop_key[:len(loop_key) - 1]] = extracted_data
+                                    if not is_optional:
+                                        self.log(f"Required key '{loop_key}' not found in {url}")
 
-                    result.append(data)
+                            elif isinstance(value[loop_key], dict):
+                                sub_loop_data = []
+                                sub_elements = element.xpath(value[loop_key]["_element"])
+                                for sub_element in sub_elements:
+                                    sub_data = {}
+                                    for sub_key, sub_value in value[loop_key].items():
+                                        if sub_key in ["_element", "_key"]:
+                                            continue
+                                        extracted_sub_data = sub_element.xpath(sub_value).getall()
+                                        stripped_sub_data = [item.strip() for item in extracted_sub_data if item.strip()]
+                                        if len(stripped_sub_data) == 1:
+                                            extracted_sub_data = sub_element.xpath(sub_value).get()
+                                        if extracted_sub_data:
+                                            sub_data[sub_key.rstrip("*")] = extracted_sub_data
+                                    if sub_data:
+                                        sub_loop_data.append(sub_data)
+                                data[value[loop_key].get("_key", "nested_loop")] = sub_loop_data
 
-                self.items_collected[url]["_loop" if value["_key"] is None else value["_key"]] = result
+                    if data:
+                        result.append(data)
+                self.items_collected[url][value.get("_key", "loop_data")] = result
 
             elif isinstance(value, dict):
                 yield from self.parse_structure(response, value)
@@ -109,9 +140,13 @@ class GeneralEngineSpider(scrapy.Spider):
                 stripped_data = [item.strip() for item in extracted_data if item.strip()]
                 if len(stripped_data) == 1:
                     extracted_data = response.xpath(value).get()
-
                 if extracted_data:
                     self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
+                else:
+                    is_optional = key.endswith("*")
+                    if not is_optional:
+                        self.log(f"Required key '{key}' not in collected_data for url {url}")
+
         try:
             collected_data = self.items_collected[url]
             if self._is_data_complete(collected_data, structure, response.url):
@@ -134,7 +169,7 @@ class GeneralEngineSpider(scrapy.Spider):
 
             if isinstance(value, dict):
                 if key_base not in collected_data or not self._is_data_complete(collected_data.get(key_base, {}),
-                                                                                value):
+                                                                                value, url):
                     if not is_optional:
                         self.log(f"Required key '{key_base}' not in collected_data for url {url}")
                         return False

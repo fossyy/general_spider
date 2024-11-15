@@ -1,14 +1,14 @@
 import requests
-import scrapy
+from scrapy import Request, Spider
+from scrapy.http import Response
 
-class GeneralEngineSpider(scrapy.Spider):
+class GeneralEngineSpider(Spider):
     name = "general_engine"
 
+    current_proxy = 0
     proxies = [
         "http://localhost:8118",
     ]
-
-    current_proxy = 0
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0',
@@ -26,7 +26,6 @@ class GeneralEngineSpider(scrapy.Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-
     def __init__(self, config_path=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         try:
@@ -40,16 +39,9 @@ class GeneralEngineSpider(scrapy.Spider):
         self.cookies = self.config.get('cookies', {})
 
     def start_requests(self):
-        yield scrapy.Request(
-            url=self.config['base_url'],
-            callback=self.parse_structure,
-            headers=self.headers,
-            cookies=self.cookies,
-            cb_kwargs={"structure": self.config["structure"]},
-            meta={'proxy': self.get_proxy()}
-        )
+        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
-    def parse_structure(self, response: scrapy.http.Response, structure):
+    def parse_structure(self, response: Response, structure):
         url = response.url
         if url not in self.items_collected:
             self.items_collected[url] = {"url": url}
@@ -58,36 +50,15 @@ class GeneralEngineSpider(scrapy.Spider):
             if key == "_element":
                 continue
 
-            if "_pagination" in value:
-                next_page = response.xpath(value["_pagination"]).get()
-                if next_page:
-                    next_page_url = response.urljoin(next_page)
-                    self.log(f"Following pagination to: {next_page_url}")
-                    yield response.follow(
-                        url=next_page_url,
-                        callback=self.parse_structure,
-                        headers=self.headers,
-                        cookies=self.cookies,
-                        cb_kwargs={"structure": structure},
-                        meta={'proxy': self.get_proxy()}
-                    )
+            if "_pagination" in value and (next_page := response.xpath(value["_pagination"]).get()):
+                next_page_url = response.urljoin(next_page)
+                self.log(f"Following pagination to: {next_page_url}")
+                yield response.follow(next_page_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
 
-            if key == "_list":
-                list_xpath = value["_element"]
-                if list_xpath:
-                    links = response.xpath(list_xpath).getall()
-                    for link in links:
-                        link_url = response.urljoin(link)
-                        self.log(f"Found link: {link_url}")
-                        yield response.follow(
-                            url=link_url,
-                            callback=self.parse_structure,
-                            headers=self.headers,
-                            cookies=self.cookies,
-                            cb_kwargs={"structure": value},
-                            meta={'proxy': self.get_proxy()}
-                        )
-
+            if "_list" in key and (list_xpath := value.get("_element")):
+                for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
+                    self.log(f"Found link: {link_url}")
+                    yield response.follow(link_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self.get_proxy()})
 
             elif key == "_loop":
                 loop_elements = response.xpath(value["_element"])

@@ -1,0 +1,24 @@
+{
+  "base_url": "http://q46wfsee26kj6oead5hg643oi363lgqiz3m45b2dwrizefryu2zdfrqd.onion/products.php",
+  "cookies": {
+    "dcap": "r65v2i0Zs83sBqzAVL4r58OIGlLxTLGcBdpFvpKC2VJcg2B2BiQfQbr7dGtzZYdO9HnO+mZpeWQxcnTgxqZdlTBZDw9iUiKMrK4EmJ5TavamjNWQ8A2vMYNZFgdCVuLfxm+asg4WLzXbudIOpT1alZkGOaxs24C/THsTdqRS3w==",
+    "PHPSESSID": "asburf1j5dgc8gvfkf7kgl9fvf"
+  },
+  "structure": {
+    "_list": {
+      "_element": "//td//a[contains(@href, 'products.php?action=view')]/@href",
+      "_list": {
+        "_element": "(//table)[6]//center//a/@href",
+        "_pagination": "(//tbody//ul[@class='pagination']//li[@class='next']//a/@href)[1]",
+        "product_title": "(//table)[4]//b/center//text()",
+        "product_image": "(//table)[12]//img/@src",
+        "product_description": "string((//table)[14])",
+        "vendor_name": "(//font[@style='font-size:115%;'])[4]/text()",
+        "product_price": "(//b//font)[9]/text()",
+        "category_price": "(//tr//td//h6//font)[84]//text()",
+        "product_shipping": "(//tr//td//h6//font)[86]//text()",
+        "product_payment_method": "(//tr//td//button[@class='level10 button3']//text())[1]"
+      }
+    }
+  }
+}

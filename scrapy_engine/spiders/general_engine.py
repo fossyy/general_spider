@@ -1,4 +1,6 @@
-import requests
+import json
+
+import psycopg2
 from scrapy import Request, Spider
 from scrapy.http import Response
 
@@ -27,18 +29,55 @@ class GeneralEngineSpider(Spider):
         return self.proxies[current_proxy_now]
 
     def __init__(self, config_path=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        try:
-            response = requests.get(f"http://0.0.0.0:8080/config/{config_path}")
-            response.raise_for_status()
-            self.config = response.json()
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching JSON from 'http://0.0.0.0:8080/config/{config_path}': {e}")
-        print(f"config path : {config_path}")
+        self.conn = None
+        self.cursor = None
+        self.config = {}
         self.items_collected = {}
-        self.cookies = self.config.get('cookies', {})
+        self.cookies = {}
+
+        super().__init__(*args, **kwargs)
+
+        conn_str = "dbname=test user=postgres password=admin host=localhost"
+
+        try:
+            self.conn = psycopg2.connect(conn_str)
+            self.cursor = self.conn.cursor()
+
+            self.cursor.execute("SELECT data_column FROM test WHERE id = %s", (config_path,))
+            row = self.cursor.fetchone()
+
+            if row is None:
+                print(f"No data found for id {config_path}")
+                return
+
+            data = row[0]
+            print("Retrieved data (as bytes):", data)
+
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+            elif not isinstance(data, str):
+                print(f"Unexpected data type: {type(data)}")
+                return
+
+            try:
+                self.config = json.loads(data)
+                print("Decoded JSON:", self.config)
+
+                self.cookies = self.config.get('cookies', {})
+            except json.JSONDecodeError as e:
+                print("Error decoding JSON:", e)
+                return
+
+        except Exception as e:
+            print(f"Error connecting to the database: {e}")
+        finally:
+            if self.cursor:
+                self.cursor.close()
+            if self.conn:
+                self.conn.close()
 
     def start_requests(self):
+        print("config : ", self.config)
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):

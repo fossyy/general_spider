@@ -1,4 +1,5 @@
-# Automatically created by: scrapyd-deploy
+# Automatically created by: scrapyd-deploysudo apt-get install libpq-dev
+
 
 from setuptools import setup, find_packages
 

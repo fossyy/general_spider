@@ -2,7 +2,11 @@ import json
 
 class JsonWriterPipeline:
     def open_spider(self, spider):
-        self.file = open('items.json', 'w')
+        output_file = getattr(spider, 'output_file', None)
+        if not output_file:
+            raise ValueError('output_file must be specified')
+
+        self.file = open(output_file, 'w')
         self.file.write('[')
         self.first_item = True
 
@@ -16,6 +20,6 @@ class JsonWriterPipeline:
         else:
             self.first_item = False
 
-        line = json.dumps(dict(item), indent=4)
+        line = json.dumps(dict(item), indent=None)
         self.file.write(line)
         return item

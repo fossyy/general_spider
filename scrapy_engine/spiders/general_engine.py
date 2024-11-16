@@ -1,6 +1,8 @@
 import requests
 from scrapy import Request, Spider
 from scrapy.http import Response
+from twisted.web.http import urlparse
+
 
 class GeneralEngineSpider(Spider):
     name = "general_engine"
@@ -33,8 +35,15 @@ class GeneralEngineSpider(Spider):
             response.raise_for_status()
             self.config = response.json()
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching JSON from 'http://0.0.0.0:8080/config/{config_path}': {e}")
-        print(f"config path : {config_path}")
+            raise RuntimeError(f"Error fetching JSON from 'http://0.0.0.0:8080/config/{config_path}': {e}")
+
+        base_url: str = self.config.get('base_url', '')
+        if not base_url:
+            raise ValueError("No base URL configured")
+
+
+        domain = urlparse(base_url.encode('utf-8')).netloc.decode('utf-8')
+        self.output_file = f"{domain}_output.json"
         self.items_collected = {}
         self.cookies = self.config.get('cookies', {})
 

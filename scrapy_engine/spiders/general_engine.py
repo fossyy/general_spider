@@ -41,7 +41,6 @@ class GeneralEngineSpider(Spider):
         if not base_url:
             raise ValueError("No base URL configured")
 
-
         domain = urlparse(base_url.encode('utf-8')).netloc.decode('utf-8')
         self.output_file = f"{domain}_output.json"
         self.items_collected = {}

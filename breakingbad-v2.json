@@ -1,0 +1,45 @@
+{
+  "base_url": "http://bbzzzsvqcrqtki6umym6itiixfhni37ybtt7mkbjyxn2pgllzxf2qgyd.onion",
+  "cookies": {},
+  "structure": {
+    "@landing_page": {
+      "_list": {
+        "_element": "//h3[@class='node-title']//a/@href",
+        "@thread_topic": {
+          "_list": {
+            "_element": "//div[contains(@class, 'structItem--thread')]//div[@class='structItem-title']/a/@href",
+            "_pagination": "(//a[contains(@class, 'pageNav-jump pageNav-jump--next')]/@href)[1]",
+            "@thread": {
+              "_pagination": "(//a[contains(@class, 'pageNav-jump pageNav-jump--next')]/@href)[1]",
+              "thread_label*": "//h1[@class='p-title-value']//span[contains(@class, 'label')]/text()",
+              "thread_title": "//h1[@class='p-title-value']/text()[normalize-space()] | //h1[contains(@class, 'p-title-value')]/text()",
+              "thread_author": "((//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body')])[1]//h4[contains(@class, 'message-name')]//a/text() | //section[@class='message-user']//a[@class='username ']/text() | (//div[contains(@class, 'p-body')]//article//*[contains(@class, 'username--staff')])[1]/text())[1]",
+              "thread_content": "string((//div[contains(@class, 'p-body')]//article[contains(@class, 'message-body')])[1]//div[@class='bbWrapper'])",
+              "thread_media*": "(//div[contains(@class, 'message-main')])[1]//img/@src | (//div[contains(@class, 'message-main')])[1]//video/source/@src",
+              "_loop": {
+                "_element": "//div[@class='block-body js-replyNewMessageContainer']//article[position()>1]",
+                "_key": "thread_reply",
+                "thread_reply_id": "./@data-content",
+                "thread_reply_author": ".//h4[contains(@class, 'message-name')]//a/text()",
+                "thread_reply_content": "string(.//div[@class='bbWrapper'])",
+                "thread_reply_date": ".//time[@class='u-dt']/@datetime",
+                "thread_reply_media*": ".//img/@src | .//video/source/@src",
+                "thread_reply_user_title": ".//div[contains(@class, 'message-userDetails')]/h5[@class='userTitle']/text()",
+                "_loop": {
+                  "_element": ".//article[contains(@class, 'message--post')]",
+                  "_key": "thread_deeper_reply",
+                  "thread_reply_id": "./@data-content",
+                  "thread_reply_author": ".//h4[contains(@class, 'message-name')]//a/text()",
+                  "thread_reply_content": "string(.//div[@class='bbWrapper'])",
+                  "thread_reply_date": ".//time[@class='u-dt']/@datetime",
+                  "thread_reply_media*": ".//img/@src | .//video/source/@src",
+                  "thread_reply_user_title": ".//div[contains(@class, 'message-userDetails')]/h5[@class='userTitle']/text()"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

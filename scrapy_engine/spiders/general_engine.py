@@ -1,3 +1,4 @@
+import json
 import requests
 from scrapy import Request, Spider
 from scrapy.http import Response
@@ -43,6 +44,11 @@ class GeneralEngineSpider(Spider):
 
         domain = urlparse(base_url.encode('utf-8')).netloc.decode('utf-8')
         self.output_file = f"{domain}_output.json"
+
+        with open(self.output_file, "r") as f:
+            data = json.load(f)
+        self.scraped_urls = [item["url"] for item in data]
+
         self.items_collected = {}
         self.cookies = self.config.get('cookies', {})
 

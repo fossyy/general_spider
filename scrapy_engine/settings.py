@@ -1,3 +1,6 @@
+import logging
+from logging.handlers import RotatingFileHandler
+
 # Scrapy settings for scrapy_engine project
 #
 # For simplicity, this file contains only settings considered important or
@@ -91,3 +94,5 @@ ITEM_PIPELINES = {
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
+
+LOG_LEVEL = 'INFO'

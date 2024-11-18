@@ -1,11 +1,8 @@
-import json
-import os
+import json, psycopg2, os
 
-import requests
 from scrapy import Request, Spider
 from scrapy.http import Response
 from twisted.web.http import urlparse
-
 
 class GeneralEngineSpider(Spider):
     name = "general_engine"
@@ -31,14 +28,40 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_path=None, *args, **kwargs):
+    def __init__(self, config_id = None, *args, **kwargs):
+        self.conn = None
+        self.cursor = None
+        self.config = {}
+        self.cookies = {}
+
         super().__init__(*args, **kwargs)
+
+        conn_str = "dbname=config user=postgres password=stagingpass host=103.47.227.82 port=5432"
+
         try:
-            response = requests.get(f"http://10.1.127.120:8080/config/{config_path}")
-            response.raise_for_status()
-            self.config = response.json()
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Error fetching JSON from 'http://10.1.127.120:8080/config/{config_path}': {e}")
+            conn = psycopg2.connect(conn_str)
+            cursor = conn.cursor()
+            cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
+            data = cursor.fetchone()[0]
+            if data is None:
+                raise ValueError("Config not found")
+
+        except (Exception, psycopg2.DatabaseError) as error:
+            print("Error while connecting to PostgreSQL", error)
+
+        try:
+            self.config = json.loads(data)
+            self.cookies = self.config.get('cookies', {})
+
+        except json.JSONDecodeError as e:
+            print("Error decoding JSON:", e)
+            return
+
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
         base_url: str = self.config.get('base_url', '')
         self.base_url = self.config.get('base_url', '')
@@ -117,7 +140,7 @@ class GeneralEngineSpider(Spider):
                     try:
                         self.items_collected[url][value.get("_key", "loop_data")] = result
                     except KeyError:
-                     pass
+                        pass
 
             if "_pagination" in value and (next_page := response.xpath(value["_pagination"]).get()):
                 next_page_url = response.urljoin(next_page)
@@ -128,13 +151,13 @@ class GeneralEngineSpider(Spider):
                 yield from self.parse_structure(response, value)
 
             elif isinstance(value, str):
-                extracted_data = response.xpath(value).getall()
-                stripped_data = [item.strip() for item in extracted_data if item.strip()]
-                if len(stripped_data) == 1:
+                extracted_data = [item.strip() for item in response.xpath(value).getall() if item.strip()]
+                if len(extracted_data) == 1:
                     extracted_data = response.xpath(value).get()
                 if extracted_data:
                     try:
-                        self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
+                        self.items_collected[url][
+                            key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
                     except KeyError:
                         pass
                 elif not key.endswith("*") and key != "_pagination":

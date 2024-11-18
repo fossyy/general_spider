@@ -1,4 +1,6 @@
 import json
+import os
+
 import requests
 from scrapy import Request, Spider
 from scrapy.http import Response
@@ -32,22 +34,26 @@ class GeneralEngineSpider(Spider):
     def __init__(self, config_path=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         try:
-            response = requests.get(f"http://0.0.0.0:8080/config/{config_path}")
+            response = requests.get(f"http://10.1.127.120:8080/config/{config_path}")
             response.raise_for_status()
             self.config = response.json()
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Error fetching JSON from 'http://0.0.0.0:8080/config/{config_path}': {e}")
+            raise RuntimeError(f"Error fetching JSON from 'http://10.1.127.120:8080/config/{config_path}': {e}")
 
         base_url: str = self.config.get('base_url', '')
+        self.base_url = self.config.get('base_url', '')
         if not base_url:
             raise ValueError("No base URL configured")
 
         domain = urlparse(base_url.encode('utf-8')).netloc.decode('utf-8')
         self.output_file = f"{domain}_output.json"
 
-        with open(self.output_file, "r") as f:
-            data = json.load(f)
-        self.scraped_urls = [item["url"] for item in data]
+        if os.path.exists(self.output_file):
+            with open(self.output_file, "r") as f:
+                data = json.load(f)
+            self.scraped_urls = [item["url"] for item in data]
+        else:
+            self.scraped_urls = []
 
         self.items_collected = {}
         self.cookies = self.config.get('cookies', {})
@@ -64,12 +70,7 @@ class GeneralEngineSpider(Spider):
             if key == "_element":
                 continue
 
-            if "_pagination" in value and (next_page := response.xpath(value["_pagination"]).get()):
-                next_page_url = response.urljoin(next_page)
-                self.log(f"Following pagination to: {next_page_url}")
-                yield response.follow(next_page_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
-
-            if "_list" in key and (list_xpath := value.get("_element")):
+            elif "_list" in key and (list_xpath := value.get("_element")):
                 for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
                     self.log(f"Found link: {link_url}")
                     yield response.follow(link_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self.get_proxy()})
@@ -91,7 +92,7 @@ class GeneralEngineSpider(Spider):
                             if extracted_data:
                                 data[loop_key.rstrip("*")] = extracted_data
                             elif not loop_key.endswith("*"):
-                                self.log(f"Required key '{loop_key}' not found in {url}")
+                                self.log(f"Required key 1 '{loop_key}' not found in {url}")
 
                         elif isinstance(value[loop_key], dict):
                             sub_loop_data = []
@@ -118,6 +119,11 @@ class GeneralEngineSpider(Spider):
                     except KeyError:
                      pass
 
+            if "_pagination" in value and (next_page := response.xpath(value["_pagination"]).get()):
+                next_page_url = response.urljoin(next_page)
+                self.log(f"Following pagination to: {next_page_url}")
+                yield response.follow(next_page_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
+
             elif isinstance(value, dict):
                 yield from self.parse_structure(response, value)
 
@@ -131,8 +137,8 @@ class GeneralEngineSpider(Spider):
                         self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
                     except KeyError:
                         pass
-                elif not key.endswith("*"):
-                    self.log(f"Required key '{key}' not found in {url}")
+                elif not key.endswith("*") and key != "_pagination":
+                    self.log(f"Required key 2 '{key}' not found in {url}")
             try:
                 collected_data = self.items_collected[url]
                 if self._is_data_complete(collected_data, structure, response.url):
@@ -155,7 +161,7 @@ class GeneralEngineSpider(Spider):
 
             if key_base not in collected_data or collected_data[key_base] is None:
                 if not is_optional:
-                    self.log(f"Required key '{key_base}' not in collected_data for url {url}")
+                    self.log(f"Required key 3 '{key_base}' not in collected_data for url {url}")
                 return False
 
             if isinstance(value, dict):

@@ -1,8 +1,10 @@
 import json, psycopg2, os
 
+from typing import Any
 from scrapy import Request, Spider
 from scrapy.http import Response
 from twisted.web.http import urlparse
+from psycopg2._psycopg import connection, cursor as cursortype
 
 class GeneralEngineSpider(Spider):
     name = "general_engine"
@@ -31,18 +33,21 @@ class GeneralEngineSpider(Spider):
     def __init__(self, config_id = None, *args, **kwargs):
         self.conn = None
         self.cursor = None
-        self.config = {}
-        self.cookies = {}
+        self.config: list[dict[str, Any]] = [{}]
+        self.cookies: dict[str, str] = {}
+        self.scraped_urls: list[str]= []
 
         super().__init__(*args, **kwargs)
 
         conn_str = "dbname=config user=postgres password=stagingpass host=103.47.227.82 port=5432"
-
+        data: bytes | None = None
+        conn: connection | None = None
+        cursor: cursortype | None = None
         try:
             conn = psycopg2.connect(conn_str)
             cursor = conn.cursor()
             cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
-            data = cursor.fetchone()[0]
+            data: bytes = cursor.fetchone()[0]
             if data is None:
                 raise ValueError("Config not found")
 
@@ -63,13 +68,12 @@ class GeneralEngineSpider(Spider):
             if conn:
                 conn.close()
 
-        base_url: str = self.config.get('base_url', '')
-        self.base_url = self.config.get('base_url', '')
-        if not base_url:
+        self.base_url: str = self.config.get('base_url', '')
+        if not self.base_url:
             raise ValueError("No base URL configured")
 
-        domain = urlparse(base_url.encode('utf-8')).netloc.decode('utf-8')
-        self.output_file = f"{domain}_output.json"
+        domain: str = urlparse(self.base_url.encode('utf-8')).netloc.decode('utf-8')
+        self.output_file: str = f"{domain}_output.json"
 
         if os.path.exists(self.output_file):
             with open(self.output_file, "r") as f:
@@ -78,14 +82,14 @@ class GeneralEngineSpider(Spider):
         else:
             self.scraped_urls = []
 
-        self.items_collected = {}
+        self.items_collected: dict[str, Any] = {}
         self.cookies = self.config.get('cookies', {})
 
     def start_requests(self):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):
-        url = response.url
+        url: str = response.url
         if url not in self.items_collected:
             self.items_collected[url] = {"url": url}
 
@@ -93,39 +97,44 @@ class GeneralEngineSpider(Spider):
             if key == "_element":
                 continue
 
-            elif "_list" in key and (list_xpath := value.get("_element")):
-                for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
-                    self.log(f"Found link: {link_url}")
-                    yield response.follow(link_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self.get_proxy()})
+            elif "_list" in key:
+                list_xpath: str = value.get("_element")
+                if list_xpath:
+                    for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
+                        self.log(f"Found link: {link_url}")
+                        yield response.follow(link_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self.get_proxy()})
 
             elif "_loop" in key:
-                loop_elements = response.xpath(value["_element"])
-                loop_keys = [k for k in value.keys() if k not in ["_element", "_key", "_pagination"]]
-                result = []
+                loop_elements: list[Response] = response.xpath(value["_element"])
+                loop_keys: list[str] = [k for k in value.keys() if k not in ["_element", "_key", "_pagination"]]
+                result: list[dict[str, Any]] = []
+
                 for element in loop_elements:
-                    data = {}
+                    data: dict[str, Any] = {}
+
                     for loop_key in loop_keys:
                         if isinstance(loop_key, str) and isinstance(value[loop_key], str):
-                            extracted_data = [item.strip() for item in element.xpath(value[loop_key]).getall() if item.strip()]
+                            extracted_data: list[str] | str = [item.strip() for item in element.xpath(value[loop_key]).getall() if item.strip()]
                             if len(extracted_data) == 1:
                                 extracted_data = element.xpath(value[loop_key]).get()
                             if loop_key.startswith(('.', '/')) and (custom_key := response.xpath(loop_key).get()):
                                 if custom_key:
                                     data[custom_key] = extracted_data
-                            if extracted_data:
-                                data[loop_key.rstrip("*")] = extracted_data
-                            elif not loop_key.endswith("*"):
-                                self.log(f"Required key 1 '{loop_key}' not found in {url}")
+                            else:
+                                if extracted_data:
+                                    data[loop_key.rstrip("*")] = extracted_data
+                                elif not loop_key.endswith("*"):
+                                    self.log(f"Required key 1 '{loop_key}' not found in {url}")
 
                         elif isinstance(value[loop_key], dict):
-                            sub_loop_data = []
-                            sub_elements = element.xpath(value[loop_key]["_element"])
+                            sub_loop_data: list[dict[str, str]] = []
+                            sub_elements: list[Response] = element.xpath(value[loop_key]["_element"])
                             for sub_element in sub_elements:
-                                sub_data = {}
+                                sub_data: dict[str, str] = {}
                                 for sub_key, sub_value in value[loop_key].items():
-                                    if sub_key in ["_element", "_key"]:
+                                    if sub_key in ["_element", "_key", "_pagination"]:
                                         continue
-                                    extracted_sub_data = [item.strip() for item in sub_element.xpath(sub_value).getall() if item.strip()]
+                                    extracted_sub_data: list[str] | str = [item.strip() for item in sub_element.xpath(sub_value).getall() if item.strip()]
                                     if len(extracted_sub_data) == 1:
                                         extracted_sub_data = sub_element.xpath(sub_value).get()
                                     if extracted_sub_data:
@@ -142,28 +151,36 @@ class GeneralEngineSpider(Spider):
                     except KeyError:
                         pass
 
-            if "_pagination" in value and (next_page := response.xpath(value["_pagination"]).get()):
-                next_page_url = response.urljoin(next_page)
-                self.log(f"Following pagination to: {next_page_url}")
-                yield response.follow(next_page_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
+            if "_pagination" in value:
+                next_page = response.xpath(value["_pagination"]).get()
+                if next_page:
+                    next_page_url = response.urljoin(next_page)
+                    self.log(f"Following pagination to: {next_page_url}")
+                    yield response.follow(
+                        url=next_page_url,
+                        callback=self.parse_structure,
+                        headers=self.headers,
+                        cookies=self.cookies,
+                        cb_kwargs={"structure": structure},
+                        meta={'proxy': self.get_proxy()}
+                    )
 
-            elif isinstance(value, dict):
+            if isinstance(value, dict):
                 yield from self.parse_structure(response, value)
 
-            elif isinstance(value, str):
-                extracted_data = [item.strip() for item in response.xpath(value).getall() if item.strip()]
+            elif isinstance(value, str) and key != "_pagination":
+                extracted_data: list[str] = [item.strip() for item in response.xpath(value).getall() if item.strip()]
                 if len(extracted_data) == 1:
                     extracted_data = response.xpath(value).get()
                 if extracted_data:
                     try:
-                        self.items_collected[url][
-                            key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
+                        self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
                     except KeyError:
                         pass
-                elif not key.endswith("*") and key != "_pagination":
+                elif not key.endswith("*") and key != "_pagination" and value != "_pagination":
                     self.log(f"Required key 2 '{key}' not found in {url}")
             try:
-                collected_data = self.items_collected[url]
+                collected_data: dict[str, Any] = self.items_collected[url]
                 if self._is_data_complete(collected_data, structure, response.url):
                     if any(key != "url" for key in collected_data.keys()):
                         yield self.items_collected.pop(url)
@@ -179,8 +196,8 @@ class GeneralEngineSpider(Spider):
             if key.startswith(("_", "@")):
                 continue
 
-            is_optional = key.endswith("*")
-            key_base = key.rstrip("*") if is_optional else key
+            is_optional: str = key.endswith("*")
+            key_base: str = key.rstrip("*") if is_optional else key
 
             if key_base not in collected_data or collected_data[key_base] is None:
                 if not is_optional:

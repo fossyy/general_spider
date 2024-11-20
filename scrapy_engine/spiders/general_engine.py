@@ -30,12 +30,13 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, *args, **kwargs):
         self.conn = None
         self.cursor = None
         self.config: list[dict[str, Any]] = [{}]
         self.cookies: dict[str, str] = {}
         self.scraped_urls: list[str]= []
+        self.output_destination: str = output_dst
 
         super().__init__(*args, **kwargs)
 
@@ -84,6 +85,10 @@ class GeneralEngineSpider(Spider):
 
         self.items_collected: dict[str, Any] = {}
         self.cookies = self.config.get('cookies', {})
+
+        if self.output_destination == "kafka":
+            self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
+            self.KAFKA_TOPIC = kafka_topic
 
     def start_requests(self):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
@@ -156,14 +161,7 @@ class GeneralEngineSpider(Spider):
                 if next_page:
                     next_page_url = response.urljoin(next_page)
                     self.log(f"Following pagination to: {next_page_url}")
-                    yield response.follow(
-                        url=next_page_url,
-                        callback=self.parse_structure,
-                        headers=self.headers,
-                        cookies=self.cookies,
-                        cb_kwargs={"structure": structure},
-                        meta={'proxy': self.get_proxy()}
-                    )
+                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
 
             if isinstance(value, dict):
                 yield from self.parse_structure(response, value)

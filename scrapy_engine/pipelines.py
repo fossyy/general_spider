@@ -6,21 +6,19 @@ from urllib.parse import urlparse
 
 class GeneralSenderPipeline:
     def open_spider(self, spider):
-        self.default_kafka_server = ''
-        self.default_kafka_topic = ''
         self.settings = get_project_settings()
-        kafka_servers = self.settings.get('KAFKA_BOOTSTRAP_SERVERS', self.default_kafka_server)
-        self.kafka_topic = self.settings.get('KAFKA_TOPIC', self.default_kafka_topic)
+        self.kafka_servers = getattr(spider, 'KAFKA_BOOTSTRAP_SERVERS', None)
+        self.kafka_topic = getattr(spider, 'KAFKA_TOPIC', None)
         output_file = getattr(spider, 'output_file', None)
         self.output_destination_file = getattr(spider, 'output_destination_file', None)
 
         self.producer = KafkaProducer(
-            bootstrap_servers = kafka_servers,
+            bootstrap_servers = self.kafka_servers,
             value_serializer = lambda v: json.dumps(v).encode('utf-8'),
             key_serializer = lambda k: str(k).encode('utf-8')
         )
         
-        spider.logger.info(f"Kafka producer connected to: {kafka_servers}, topic: {self.kafka_topic}")
+        spider.logger.info(f"Kafka producer connected to: {self.kafka_servers}, topic: {self.kafka_topic}")
 
         if not output_file:
             raise ValueError('output_file must be specified')
@@ -46,6 +44,9 @@ class GeneralSenderPipeline:
 
     def process_item(self, item, spider):
         if self.output_destination_file == 'kafka':
+            if self.kafka_servers is None or self.kafka_topic is None:
+                raise ValueError('kafka servers and topic must be specified')
+
             try:
                 self.producer.send(self.kafka_topic, value = dict(item))
                 self.producer.flush()
@@ -72,7 +73,7 @@ class GeneralSenderPipeline:
                 line = json.dumps(dict(item), indent = None)
                 f.write(line)
         else:
-             self.logger.info(f"No have output destination")   
+             spider.logger.info(f"No have output destination")
 
         return item
 

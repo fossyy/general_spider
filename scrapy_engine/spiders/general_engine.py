@@ -12,11 +12,7 @@ class GeneralEngineSpider(Spider):
 
     current_proxy = 0
     proxies = [
-        "http://scrapyd-torproxy-1:8118",
-        "http://scrapyd-torproxy-2:8118",
-        "http://scrapyd-torproxy-3:8118",
-        "http://scrapyd-torproxy-4:8118",
-        "http://scrapyd-torproxy-5:8118"
+        "http://localhost:8118",
     ]
 
     headers = {
@@ -35,7 +31,7 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, output_dst = "local" , *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", KAFKA_BOOTSTRAP_SERVERS=None, KAFKA_TOPIC=None , *args, **kwargs):
         self.conn = None
         self.cursor = None
         self.config: list[dict[str, Any]] = [{}]
@@ -65,9 +61,7 @@ class GeneralEngineSpider(Spider):
             self.cookies = self.config.get('cookies', {})
 
         except json.JSONDecodeError as e:
-            print("Error decoding JSON:", e)
-            return
-
+            raise ValueError("Config not found")
         finally:
             if cursor:
                 cursor.close()
@@ -95,6 +89,10 @@ class GeneralEngineSpider(Spider):
 
         self.items_collected: dict[str, Any] = {}
         self.cookies = self.config.get('cookies', {})
+
+        if self.output_destination_file == "kafka":
+            self.KAFKA_BOOTSTRAP_SERVERS = KAFKA_BOOTSTRAP_SERVERS
+            self.KAFKA_TOPIC = KAFKA_TOPIC
 
     def start_requests(self):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})

@@ -1,6 +1,3 @@
-import logging
-from logging.handlers import RotatingFileHandler
-
 # Scrapy settings for scrapy_engine project
 #
 # For simplicity, this file contains only settings considered important or
@@ -66,7 +63,7 @@ DOWNLOADER_MIDDLEWARES = {
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
-   "scrapy_engine.pipelines.JsonWriterPipeline": 300,
+   "scrapy_engine.pipelines.GeneralSenderPipeline": 300,
 }
 
 # Enable and configure the AutoThrottle extension (disabled by default)
@@ -95,4 +92,4 @@ REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 
-LOG_LEVEL = 'INFO'
+LOG_LEVEL = "INFO"

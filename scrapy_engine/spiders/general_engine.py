@@ -31,7 +31,7 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, output_dst = "local", KAFKA_BOOTSTRAP_SERVERS=None, KAFKA_TOPIC=None , *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None , *args, **kwargs):
         self.conn = None
         self.cursor = None
         self.config: list[dict[str, Any]] = [{}]
@@ -91,8 +91,8 @@ class GeneralEngineSpider(Spider):
         self.cookies = self.config.get('cookies', {})
 
         if self.output_destination_file == "kafka":
-            self.KAFKA_BOOTSTRAP_SERVERS = KAFKA_BOOTSTRAP_SERVERS
-            self.KAFKA_TOPIC = KAFKA_TOPIC
+            self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
+            self.KAFKA_TOPIC = kafka_topic
 
     def start_requests(self):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})

@@ -1,12 +1,10 @@
 import json, os
 
-from scrapy.utils.project import get_project_settings
 from kafka import KafkaProducer
 from urllib.parse import urlparse
 
 class GeneralSenderPipeline:
     def open_spider(self, spider):
-        self.settings = get_project_settings()
         self.kafka_servers = getattr(spider, 'KAFKA_BOOTSTRAP_SERVERS', None)
         self.kafka_topic = getattr(spider, 'KAFKA_TOPIC', None)
         output_file = getattr(spider, 'output_file', None)

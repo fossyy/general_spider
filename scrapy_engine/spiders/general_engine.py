@@ -5,13 +5,18 @@ from scrapy import Request, Spider
 from scrapy.http import Response
 from twisted.web.http import urlparse
 from psycopg2._psycopg import connection, cursor as cursortype
+from urllib.parse import urlparse
 
 class GeneralEngineSpider(Spider):
     name = "general_engine"
 
     current_proxy = 0
     proxies = [
-        "http://localhost:8118",
+        "http://scrapyd-torproxy-1:8118",
+        "http://scrapyd-torproxy-2:8118",
+        "http://scrapyd-torproxy-3:8118",
+        "http://scrapyd-torproxy-4:8118",
+        "http://scrapyd-torproxy-5:8118"
     ]
 
     headers = {
@@ -30,12 +35,13 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local" , *args, **kwargs):
         self.conn = None
         self.cursor = None
         self.config: list[dict[str, Any]] = [{}]
         self.cookies: dict[str, str] = {}
         self.scraped_urls: list[str]= []
+        self.output_destination_file: str = output_dst
 
         super().__init__(*args, **kwargs)
 
@@ -78,7 +84,12 @@ class GeneralEngineSpider(Spider):
         if os.path.exists(self.output_file):
             with open(self.output_file, "r") as f:
                 data = json.load(f)
-            self.scraped_urls = [item["url"] for item in data]
+            if isinstance(data, list):
+                self.scraped_urls = data
+            elif isinstance(data, dict):
+                self.scraped_urls = [item["url"] for item in data]
+            else:
+                raise ValueError("Invalid data format in output file")
         else:
             self.scraped_urls = []
 
@@ -89,7 +100,7 @@ class GeneralEngineSpider(Spider):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):
-        url: str = response.url
+        url: str = urlparse(response.url).path
         if url not in self.items_collected:
             self.items_collected[url] = {"url": url}
 
@@ -117,9 +128,9 @@ class GeneralEngineSpider(Spider):
                             extracted_data: list[str] | str = [item.strip() for item in element.xpath(value[loop_key]).getall() if item.strip()]
                             if len(extracted_data) == 1:
                                 extracted_data = element.xpath(value[loop_key]).get()
-                            if loop_key.startswith(('.', '/')) and (custom_key := response.xpath(loop_key).get()):
-                                if custom_key:
-                                    data[custom_key] = extracted_data
+                            # if loop_key.startswith(('.', '/')) and (custom_key := response.xpath(loop_key).get()):
+                            #     if custom_key:
+                            #         data[custom_key] = extracted_data
                             else:
                                 if extracted_data:
                                     data[loop_key.rstrip("*")] = extracted_data
@@ -156,14 +167,7 @@ class GeneralEngineSpider(Spider):
                 if next_page:
                     next_page_url = response.urljoin(next_page)
                     self.log(f"Following pagination to: {next_page_url}")
-                    yield response.follow(
-                        url=next_page_url,
-                        callback=self.parse_structure,
-                        headers=self.headers,
-                        cookies=self.cookies,
-                        cb_kwargs={"structure": structure},
-                        meta={'proxy': self.get_proxy()}
-                    )
+                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
 
             if isinstance(value, dict):
                 yield from self.parse_structure(response, value)

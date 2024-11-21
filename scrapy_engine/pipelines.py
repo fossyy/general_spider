@@ -27,7 +27,7 @@ class GeneralSenderPipeline:
         formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
         log_file = 'log.log'
         base_url = getattr(spider, 'base_url', None)
-        log_folder = Path(f"logs/{urlparse(base_url).netloc if base_url is not None else 'default_output' }")
+        log_folder = Path(f"logs/{urlparse(base_url).netloc if base_url is not None else 'default_output' }/{getattr(spider, 'job_id', 'default_job_id')}")
         log_folder.mkdir(parents=True, exist_ok=True)
 
         rotating_file_log = RotatingFileHandler(log_folder/log_file, maxBytes=1024*1024*10, backupCount=10, encoding='utf-8')

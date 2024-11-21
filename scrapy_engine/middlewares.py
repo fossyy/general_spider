@@ -3,7 +3,6 @@ from scrapy.exceptions import IgnoreRequest
 from scrapy.http import Response
 from urllib.parse import urlparse
 
-
 class ScrapyEngineSpiderMiddleware:
     def __init__(self):
         self.scraped_urls = []

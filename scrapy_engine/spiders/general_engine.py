@@ -1,4 +1,6 @@
 import json, psycopg2, os
+import time
+from datetime import datetime, timedelta
 
 from typing import Any
 from scrapy import Request, Spider
@@ -6,7 +8,10 @@ from scrapy.http import Response
 from twisted.web.http import urlparse
 from psycopg2._psycopg import connection, cursor as cursortype
 from urllib.parse import urlparse
-
+import logging, os, sys
+from logging.handlers import RotatingFileHandler
+from scrapy.utils.log import configure_logging
+from pathlib import Path
 class GeneralEngineSpider(Spider):
     name = "general_engine"
 
@@ -32,29 +37,29 @@ class GeneralEngineSpider(Spider):
         return self.proxies[current_proxy_now]
 
     def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None , *args, **kwargs):
-        self.conn = None
-        self.cursor = None
+        self.conn: connection | None = None
+        self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
         self.cookies: dict[str, str] = {}
         self.scraped_urls: list[str]= []
-        self.output_destination_file: str = output_dst
+        self.output_dst: str = output_dst
+        self.crawled_count: int = 0
+        self.status_codes: dict[str, int] = {}
 
         super().__init__(*args, **kwargs)
 
         conn_str = "dbname=config user=postgres password=stagingpass host=103.47.227.82 port=5432"
         data: bytes | None = None
-        conn: connection | None = None
-        cursor: cursortype | None = None
         try:
-            conn = psycopg2.connect(conn_str)
-            cursor = conn.cursor()
-            cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
-            data: bytes = cursor.fetchone()[0]
+            self.conn = psycopg2.connect(conn_str)
+            self.cursor = self.conn.cursor()
+            self.cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
+            data: bytes = self.cursor.fetchone()[0]
             if data is None:
                 raise ValueError("Config not found")
 
         except (Exception, psycopg2.DatabaseError) as error:
-            print("Error while connecting to PostgreSQL", error)
+            raise ConnectionError("Error while connecting to PostgreSQL", error)
 
         try:
             self.config = json.loads(data)
@@ -63,10 +68,10 @@ class GeneralEngineSpider(Spider):
         except json.JSONDecodeError as e:
             raise ValueError("Config not found")
         finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
+            if self.cursor:
+                self.cursor.close()
+            if self.conn:
+                self.conn.close()
 
         self.base_url: str = self.config.get('base_url', '')
         if not self.base_url:
@@ -90,7 +95,7 @@ class GeneralEngineSpider(Spider):
         self.items_collected: dict[str, Any] = {}
         self.cookies = self.config.get('cookies', {})
 
-        if self.output_destination_file == "kafka":
+        if self.output_dst == "kafka":
             self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
             self.KAFKA_TOPIC = kafka_topic
 

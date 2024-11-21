@@ -1,6 +1,4 @@
-import json, psycopg2, os
-import time
-from datetime import datetime, timedelta
+import json, psycopg2 , os, random, string
 
 from typing import Any
 from scrapy import Request, Spider
@@ -8,10 +6,7 @@ from scrapy.http import Response
 from twisted.web.http import urlparse
 from psycopg2._psycopg import connection, cursor as cursortype
 from urllib.parse import urlparse
-import logging, os, sys
-from logging.handlers import RotatingFileHandler
-from scrapy.utils.log import configure_logging
-from pathlib import Path
+
 class GeneralEngineSpider(Spider):
     name = "general_engine"
 
@@ -36,7 +31,7 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None , *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None, *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
@@ -45,11 +40,22 @@ class GeneralEngineSpider(Spider):
         self.output_dst: str = output_dst
         self.crawled_count: int = 0
         self.status_codes: dict[str, int] = {}
+        self.job_id: str | None = kwargs.get('_job')
+
+        if self.job_id is None:
+            self.job_id = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
 
         super().__init__(*args, **kwargs)
 
-        conn_str = "dbname=config user=postgres password=stagingpass host=103.47.227.82 port=5432"
-        data: bytes | None = None
+        dbHost = os.environ.get('DB_HOST', "103.47.227.82")
+        dbPort = os.environ.get('DB_PORT', "5432")
+        dbName = os.environ.get('DB_NAME', "config")
+        dbUser = os.environ.get('DB_USERNAME', "postgres")
+        dbPass = os.environ.get('DB_PASSWORD', "stagingpass")
+        if not dbHost or not dbPort or not dbName or not dbUser or not dbPass:
+            raise ValueError("Missing required environment variables for database")
+
+        conn_str = f"dbname={dbName} user={dbUser} password={dbPass} host={dbHost} port={dbPort}"
         try:
             self.conn = psycopg2.connect(conn_str)
             self.cursor = self.conn.cursor()
@@ -63,7 +69,7 @@ class GeneralEngineSpider(Spider):
 
         try:
             self.config = json.loads(data)
-            self.cookies = self.config.get('cookies', {})
+            self.cookies = self.config.get('cookies', { })
 
         except json.JSONDecodeError as e:
             raise ValueError("Config not found")

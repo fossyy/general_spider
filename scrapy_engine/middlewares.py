@@ -1,3 +1,4 @@
+from datetime import datetime
 from scrapy.exceptions import IgnoreRequest
 from scrapy.http import Response
 from urllib.parse import urlparse
@@ -8,6 +9,8 @@ class ScrapyEngineSpiderMiddleware:
         self.scraped_urls = []
         self.first_item = True
         self.base_url = ''
+        self.status_codes = {}
+        self.last_logged = datetime.now()
 
     def process_request(self, request, spider):
         if self.scraped_urls == [] and self.first_item:
@@ -26,6 +29,8 @@ class ScrapyEngineSpiderMiddleware:
         if response.status == 200:
             self.scraped_urls.append(response.url)
 
+        self.status_codes[response.status] = self.status_codes.get(response.status, 0) + 1
+        setattr(spider, "status_codes", self.status_codes)
         spider.logger.info(f"Crawled ({response.status}) {response.url}")
 
         return response

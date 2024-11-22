@@ -6,31 +6,11 @@ from scrapy.http import Response
 from twisted.web.http import urlparse
 from dotenv import load_dotenv
 from psycopg2._psycopg import connection, cursor as cursortype
-from urllib.parse import urlparse
 
 class GeneralEngineSpider(Spider):
     name: str = "general_engine"
 
-    current_proxy: int = 0
-    proxies: list[str] = ["http://localhost:8118"]
-
-    headers: dict[str, str] = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0',
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'same-origin',
-        'Sec-Fetch-User': '?1'
-    }
-
-    def get_proxy(self):
-        current_proxy_now = self.current_proxy % len(self.proxies)
-        self.current_proxy += 1
-        return self.proxies[current_proxy_now]
-
-    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", preview_config=None, *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", preview_config = None, proxies = None, *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
@@ -41,6 +21,11 @@ class GeneralEngineSpider(Spider):
         self.status_codes: dict[str, int] = {}
         self.job_id: str | None = kwargs.get('_job')
         self.preview: str = preview
+        self.headers: dict[str, str] = {}           
+        self.proxies: bytes[list[str]] = proxies
+        
+        if self.proxies is not None:
+            self.proxies = json.loads(base64.b64decode(self.proxies).decode("utf-8"))    
 
         if self.job_id is None:
             self.job_id = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
@@ -76,10 +61,12 @@ class GeneralEngineSpider(Spider):
 
             try:
                 self.config = json.loads(data)
-                self.cookies = self.config.get('cookies', { })
+                self.cookies = self.config.get('cookies', {})
+                self.headers = self.config.get('headers', {})
 
             except json.JSONDecodeError as e:
                 raise ValueError("Config not found")
+            
             finally:
                 if self.cursor:
                     self.cursor.close()
@@ -96,9 +83,7 @@ class GeneralEngineSpider(Spider):
             if os.path.exists(self.output_file):
                 with open(self.output_file, "r") as f:
                     data = json.load(f)
-                if isinstance(data, list):
-                    self.scraped_urls = data
-                elif isinstance(data, dict):
+                if isinstance(data, dict):
                     self.scraped_urls = [item["url"] for item in data]
                 else:
                     raise ValueError("Invalid data format in output file")
@@ -112,12 +97,19 @@ class GeneralEngineSpider(Spider):
             self.KAFKA_TOPIC = kafka_topic
 
         self.cookies = self.config.get('cookies', {})
+        self.headers = self.config.get('headers', {})
+    
+    current_proxy: int = 0    
+    def get_proxy(self):
+        current_proxy_now = self.current_proxy % len(self.proxies)
+        self.current_proxy += 1
+        return self.proxies[current_proxy_now]
 
     def start_requests(self):
         yield Request(url=self.config['base_url'] + '/', callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):
-        url: str = urlparse(response.url).path
+        url: str = response.url
         if url not in self.items_collected:
             self.items_collected[url] = {"url": url}
 

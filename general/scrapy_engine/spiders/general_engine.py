@@ -1,20 +1,79 @@
-import json, psycopg2 , os, random, string, base64
+import json, psycopg2, os
+import time
+from datetime import datetime, timedelta
 
 from typing import Any
 from scrapy import Request, Spider
 from scrapy.http import Response
 from twisted.web.http import urlparse
-from dotenv import load_dotenv
 from psycopg2._psycopg import connection, cursor as cursortype
 from urllib.parse import urlparse
-
+import logging, os, sys
+from logging.handlers import RotatingFileHandler
+from scrapy.utils.log import configure_logging
+from pathlib import Path
 class GeneralEngineSpider(Spider):
-    name: str = "general_engine"
+    name = "general_engine"
 
-    current_proxy: int = 0
-    proxies: list[str] = ["http://localhost:8118"]
+    current_proxy = 0
+    # proxies = [
+    #     "http://localhost:8118",
+    # ]
 
-    headers: dict[str, str] = {
+    proxies = [
+        "http://scrapyd-torproxy-1:8118",
+        "http://scrapyd-torproxy-2:8118",
+        "http://scrapyd-torproxy-3:8118",
+        "http://scrapyd-torproxy-4:8118",
+        "http://scrapyd-torproxy-5:8118",
+        "http://scrapyd-torproxy-6:8118",
+        "http://scrapyd-torproxy-7:8118",
+        "http://scrapyd-torproxy-8:8118",
+        "http://scrapyd-torproxy-9:8118",
+        "http://scrapyd-torproxy-10:8118",
+        "http://scrapyd-torproxy-11:8118",
+        "http://scrapyd-torproxy-12:8118",
+        "http://scrapyd-torproxy-13:8118",
+        "http://scrapyd-torproxy-14:8118",
+        "http://scrapyd-torproxy-15:8118",
+        "http://scrapyd-torproxy-16:8118",
+        "http://scrapyd-torproxy-17:8118",
+        "http://scrapyd-torproxy-18:8118",
+        "http://scrapyd-torproxy-19:8118",
+        "http://scrapyd-torproxy-20:8118",
+        "http://scrapyd-torproxy-21:8118",
+        "http://scrapyd-torproxy-22:8118",
+        "http://scrapyd-torproxy-23:8118",
+        "http://scrapyd-torproxy-24:8118",
+        "http://scrapyd-torproxy-25:8118",
+        "http://scrapyd-torproxy-26:8118",
+        "http://scrapyd-torproxy-27:8118",
+        "http://scrapyd-torproxy-28:8118",
+        "http://scrapyd-torproxy-29:8118",
+        "http://scrapyd-torproxy-30:8118",
+        "http://scrapyd-torproxy-31:8118",
+        "http://scrapyd-torproxy-32:8118",
+        "http://scrapyd-torproxy-33:8118",
+        "http://scrapyd-torproxy-34:8118",
+        "http://scrapyd-torproxy-35:8118",
+        "http://scrapyd-torproxy-36:8118",
+        "http://scrapyd-torproxy-37:8118",
+        "http://scrapyd-torproxy-38:8118",
+        "http://scrapyd-torproxy-39:8118",
+        "http://scrapyd-torproxy-40:8118",
+        "http://scrapyd-torproxy-41:8118",
+        "http://scrapyd-torproxy-42:8118",
+        "http://scrapyd-torproxy-43:8118",
+        "http://scrapyd-torproxy-44:8118",
+        "http://scrapyd-torproxy-45:8118",
+        "http://scrapyd-torproxy-46:8118",
+        "http://scrapyd-torproxy-47:8118",
+        "http://scrapyd-torproxy-48:8118",
+        "http://scrapyd-torproxy-49:8118",
+        "http://scrapyd-torproxy-50:8118"
+    ]
+
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0',
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         'Accept-Language': 'en-US,en;q=0.5',
@@ -30,7 +89,7 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", preview_config=None, *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None , *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
@@ -39,82 +98,70 @@ class GeneralEngineSpider(Spider):
         self.output_dst: str = output_dst
         self.crawled_count: int = 0
         self.status_codes: dict[str, int] = {}
-        self.job_id: str | None = kwargs.get('_job')
-        self.preview: str = preview
-
-        if self.job_id is None:
-            self.job_id = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
 
         super().__init__(*args, **kwargs)
-        if self.preview == "yes":
-            self.preview_config = preview_config
-            if self.preview_config is None:
-                raise ValueError("preview_config cannot be None for preview run")
-            print(kwargs.get('_job'))
-            self.config = json.loads(base64.b64decode(self.preview_config).decode("utf-8"))
-        else:
-            load_dotenv()
-            dbHost: str = os.environ.get('DB_HOST', None)
-            dbPort: str = os.environ.get('DB_PORT', None)
-            dbName: str = os.environ.get('DB_NAME', None)
-            dbUser: str = os.environ.get('DB_USERNAME', None)
-            dbPass: str = os.environ.get('DB_PASSWORD', None)
-            if dbHost is None or dbPort is None or dbName is None or dbUser is None or dbPass is None:
-                raise ValueError("Missing required environment variables for database")
 
-            conn_str: str = f"dbname={dbName} user={dbUser} password={dbPass} host={dbHost} port={dbPort}"
-            try:
-                self.conn = psycopg2.connect(conn_str)
-                self.cursor = self.conn.cursor()
-                self.cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
-                data: bytes = self.cursor.fetchone()[0]
-                if data is None:
-                    raise ValueError("Config not found")
+        dbHost = os.environ.get('DB_HOST', None)
+        dbPort = os.environ.get('DB_PORT', None)
+        dbName = os.environ.get('DB_NAME', None)
+        dbUser = os.environ.get('DB_USERNAME', None)
+        dbPass = os.environ.get('DB_PASSWORD', None)
+        if not dbHost or not dbPort or not dbName or not dbUser or not dbPass:
+            raise ValueError("Missing required environment variables for database")
 
-            except (Exception, psycopg2.DatabaseError) as error:
-                raise ConnectionError("Error while connecting to PostgreSQL", error)
-
-            try:
-                self.config = json.loads(data)
-                self.cookies = self.config.get('cookies', { })
-
-            except json.JSONDecodeError as e:
+        conn_str = f"dbname={dbName} user={dbUser} password={dbPass} host={dbHost} port={dbPort}"
+        data: bytes | None = None
+        try:
+            self.conn = psycopg2.connect(conn_str)
+            self.cursor = self.conn.cursor()
+            self.cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
+            data: bytes = self.cursor.fetchone()[0]
+            if data is None:
                 raise ValueError("Config not found")
-            finally:
-                if self.cursor:
-                    self.cursor.close()
-                if self.conn:
-                    self.conn.close()
 
-            self.base_url: str = self.config.get('base_url', '')
-            if not self.base_url:
-                raise ValueError("No base URL configured")
+        except (Exception, psycopg2.DatabaseError) as error:
+            raise ConnectionError("Error while connecting to PostgreSQL", error)
 
-            domain: str = urlparse(self.base_url.encode('utf-8')).netloc.decode('utf-8')
-            self.output_file: str = f"{domain}_output.json"
+        try:
+            self.config = json.loads(data)
+            self.cookies = self.config.get('cookies', {})
 
-            if os.path.exists(self.output_file):
-                with open(self.output_file, "r") as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    self.scraped_urls = data
-                elif isinstance(data, dict):
-                    self.scraped_urls = [item["url"] for item in data]
-                else:
-                    raise ValueError("Invalid data format in output file")
+        except json.JSONDecodeError as e:
+            raise ValueError("Config not found")
+        finally:
+            if self.cursor:
+                self.cursor.close()
+            if self.conn:
+                self.conn.close()
+
+        self.base_url: str = self.config.get('base_url', '')
+        if not self.base_url:
+            raise ValueError("No base URL configured")
+
+        domain: str = urlparse(self.base_url.encode('utf-8')).netloc.decode('utf-8')
+        self.output_file: str = f"{domain}_output.json"
+
+        if os.path.exists(self.output_file):
+            with open(self.output_file, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                self.scraped_urls = data
+            elif isinstance(data, dict):
+                self.scraped_urls = [item["url"] for item in data]
             else:
-                self.scraped_urls = []
+                raise ValueError("Invalid data format in output file")
+        else:
+            self.scraped_urls = []
 
         self.items_collected: dict[str, Any] = {}
+        self.cookies = self.config.get('cookies', {})
 
         if self.output_dst == "kafka":
             self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
             self.KAFKA_TOPIC = kafka_topic
 
-        self.cookies = self.config.get('cookies', {})
-
     def start_requests(self):
-        yield Request(url=self.config['base_url'] + '/', callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
+        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):
         url: str = urlparse(response.url).path
@@ -180,7 +227,7 @@ class GeneralEngineSpider(Spider):
                         pass
 
             if "_pagination" in value:
-                next_page: str = response.xpath(value["_pagination"]).get()
+                next_page = response.xpath(value["_pagination"]).get()
                 if next_page:
                     next_page_url = response.urljoin(next_page)
                     self.log(f"Following pagination to: {next_page_url}")

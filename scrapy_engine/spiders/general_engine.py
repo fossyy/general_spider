@@ -4,18 +4,17 @@ from typing import Any
 from scrapy import Request, Spider
 from scrapy.http import Response
 from twisted.web.http import urlparse
+from dotenv import load_dotenv
 from psycopg2._psycopg import connection, cursor as cursortype
 from urllib.parse import urlparse
 
 class GeneralEngineSpider(Spider):
-    name = "general_engine"
+    name: str = "general_engine"
 
-    current_proxy = 0
-    proxies = [
-        "http://localhost:8118",
-    ]
+    current_proxy: str = 0
+    proxies: list[str] = ["http://localhost:8118"]
 
-    headers = {
+    headers: dict[str, str] = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0',
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         'Accept-Language': 'en-US,en;q=0.5',
@@ -31,7 +30,7 @@ class GeneralEngineSpider(Spider):
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
 
-    def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None, *args, **kwargs):
+    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
@@ -41,21 +40,23 @@ class GeneralEngineSpider(Spider):
         self.crawled_count: int = 0
         self.status_codes: dict[str, int] = {}
         self.job_id: str | None = kwargs.get('_job')
+        self.preview: str = preview
 
         if self.job_id is None:
             self.job_id = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
 
         super().__init__(*args, **kwargs)
-
-        dbHost = os.environ.get('DB_HOST', "103.47.227.82")
-        dbPort = os.environ.get('DB_PORT', "5432")
-        dbName = os.environ.get('DB_NAME', "config")
-        dbUser = os.environ.get('DB_USERNAME', "postgres")
-        dbPass = os.environ.get('DB_PASSWORD', "stagingpass")
-        if not dbHost or not dbPort or not dbName or not dbUser or not dbPass:
+        
+        load_dotenv()
+        dbHost: str = os.environ.get('DB_HOST', None)
+        dbPort: str = os.environ.get('DB_PORT', None)
+        dbName: str = os.environ.get('DB_NAME', None)
+        dbUser: str = os.environ.get('DB_USERNAME', None)
+        dbPass: str = os.environ.get('DB_PASSWORD', None)
+        if dbHost is None or dbPort is None or dbName is None or dbUser is None or dbPass is None:
             raise ValueError("Missing required environment variables for database")
 
-        conn_str = f"dbname={dbName} user={dbUser} password={dbPass} host={dbHost} port={dbPort}"
+        conn_str: str = f"dbname={dbName} user={dbUser} password={dbPass} host={dbHost} port={dbPort}"
         try:
             self.conn = psycopg2.connect(conn_str)
             self.cursor = self.conn.cursor()
@@ -106,7 +107,7 @@ class GeneralEngineSpider(Spider):
             self.KAFKA_TOPIC = kafka_topic
 
     def start_requests(self):
-        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
+        yield Request(url=self.config['base_url'] + '/', callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):
         url: str = urlparse(response.url).path
@@ -172,7 +173,7 @@ class GeneralEngineSpider(Spider):
                         pass
 
             if "_pagination" in value:
-                next_page = response.xpath(value["_pagination"]).get()
+                next_page: str = response.xpath(value["_pagination"]).get()
                 if next_page:
                     next_page_url = response.urljoin(next_page)
                     self.log(f"Following pagination to: {next_page_url}")

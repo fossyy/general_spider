@@ -1,4 +1,4 @@
-import json, psycopg2 , os, random, string, base64
+import json, psycopg2, os, random, string, base64, re
 
 from typing import Any
 from scrapy import Request, Spider
@@ -6,11 +6,13 @@ from scrapy.http import Response
 from twisted.web.http import urlparse
 from dotenv import load_dotenv
 from psycopg2._psycopg import connection, cursor as cursortype
+from pathlib import Path
+from urllib.parse import urlparse
 
 class GeneralEngineSpider(Spider):
     name: str = "general_engine"
-
-    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", preview_config = None, proxies = None, *args, **kwargs):
+    
+    def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", preview_config = None, proxies = None, preview_proxies = None, cookies = None, *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
@@ -23,20 +25,28 @@ class GeneralEngineSpider(Spider):
         self.preview: str = preview
         self.headers: dict[str, str] = {}           
         self.proxies: bytes[list[str]] = proxies
+        self.cookies: bytes[dict[str, str]] = cookies
         
-        if self.proxies is not None:
-            self.proxies = json.loads(base64.b64decode(self.proxies).decode("utf-8"))    
+        if self.proxies is None:
+            raise ValueError("Proxies cannot be None")
+        self.proxies = json.loads(base64.b64decode(self.proxies).decode("utf-8"))    
+        
+        if self.cookies is not None:
+            self.cookies = json.loads(base64.b64decode(self.cookies).decode("utf-8"))
 
         if self.job_id is None:
-            self.job_id = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
+            self.job_id = ''.join(random.SystemRandom().choice(string.ascii_lowercase + string.digits) for _ in range(24))
 
         super().__init__(*args, **kwargs)
         if self.preview == "yes":
             self.preview_config = preview_config
+            self.preview_proxies = preview_proxies
             if self.preview_config is None:
                 raise ValueError("preview_config cannot be None for preview run")
-            print(kwargs.get('_job'))
+            if self.preview_proxy is None:
+                raise ValueError("preview_proxies cannot be None for preview run")
             self.config = json.loads(base64.b64decode(self.preview_config).decode("utf-8"))
+            self.proxies = json.loads(base64.b64decode(self.preview_proxies).decode("utf-8"))
         else:
             load_dotenv()
             dbHost: str = os.environ.get('DB_HOST', None)
@@ -61,7 +71,6 @@ class GeneralEngineSpider(Spider):
 
             try:
                 self.config = json.loads(data)
-                self.cookies = self.config.get('cookies', {})
                 self.headers = self.config.get('headers', {})
 
             except json.JSONDecodeError as e:
@@ -77,14 +86,36 @@ class GeneralEngineSpider(Spider):
             if not self.base_url:
                 raise ValueError("No base URL configured")
 
-            domain: str = urlparse(self.base_url.encode('utf-8')).netloc.decode('utf-8')
-            self.output_file: str = f"{domain}_output.json"
-
-            if os.path.exists(self.output_file):
-                with open(self.output_file, "r") as f:
-                    data = json.load(f)
+            self.result_folder = Path(f"results/{urlparse(self.base_url).netloc if self.base_url is not None else 'default_output'}") 
+            self.result_folder.mkdir(parents=True, exist_ok=True)    
+            self.output_file = self.result_folder/"result.json"
+            
+            if self.output_file.exists():
+                try:
+                    with open(self.output_file, "r") as f:
+                        json_content = re.sub(r'},\s*]', '}]',
+                                       re.sub(r'},\s*}', '}}',  
+                                       re.sub(r',\s*]', ']', 
+                                       re.sub(r',\s*}', '}',   
+                                       re.sub(r'},\s*$', '}', 
+                                       f.read())))))
+                        json_content += ']' if not json_content.strip().endswith(']') else ''
+                        data = json.loads(json_content)
+                except json.JSONDecodeError as e:
+                    if "Expecting ',' delimiter" in str(e):
+                        raise ValueError(f"Invalid JSON format: {e}")
+                    else:
+                        raise
+                except Exception as e:
+                    raise RuntimeError("Unknown error while reading output file")   
                 if isinstance(data, dict):
                     self.scraped_urls = [item["url"] for item in data]
+                elif isinstance(data, list):
+                    for sub_data in data:
+                        if isinstance(sub_data, dict) and "url" in sub_data:
+                            self.scraped_urls.append(sub_data["url"])
+                        else:
+                            self.scraped_urls.append(sub_data)
                 else:
                     raise ValueError("Invalid data format in output file")
             else:
@@ -95,9 +126,6 @@ class GeneralEngineSpider(Spider):
         if self.output_dst == "kafka":
             self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
             self.KAFKA_TOPIC = kafka_topic
-
-        self.cookies = self.config.get('cookies', {})
-        self.headers = self.config.get('headers', {})
     
     current_proxy: int = 0    
     def get_proxy(self):
@@ -106,7 +134,7 @@ class GeneralEngineSpider(Spider):
         return self.proxies[current_proxy_now]
 
     def start_requests(self):
-        yield Request(url=self.config['base_url'] + '/', callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
+        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
     def parse_structure(self, response: Response, structure):
         url: str = response.url

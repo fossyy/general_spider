@@ -1,4 +1,5 @@
 import json, os, sys, logging, requests
+
 from datetime import datetime
 from threading import Thread, Event
 from kafka import KafkaProducer
@@ -16,6 +17,9 @@ class GeneralSenderPipeline:
         self.output_file = getattr(spider, 'output_file', None)
         self.output_dst = getattr(spider, 'output_dst', None)
         self.preview = getattr(spider, 'preview', None)  
+        self.base_url = getattr(spider, 'base_url', None)
+        self.url_parse = urlparse(self.base_url).netloc if self.base_url is not None else 'default_output'
+        self.job_id = getattr(spider, 'job_id', 'default_job_id')
         self.crawl_count = 0
         self.last_logged = datetime.now()
         
@@ -28,8 +32,7 @@ class GeneralSenderPipeline:
         configure_logging(install_root_handler=False)
         formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
         log_file = 'log.log'
-        base_url = getattr(spider, 'base_url', None)
-        log_folder = Path(f"logs/{urlparse(base_url).netloc if base_url is not None else 'default_output' }/{getattr(spider, 'job_id', 'default_job_id')}")
+        log_folder = Path(f"logs/{self.url_parse}/{self.job_id}")
         log_folder.mkdir(parents=True, exist_ok=True)
 
         rotating_file_log = RotatingFileHandler(log_folder/log_file, maxBytes=1024*1024*10, backupCount=10, encoding = 'utf-8')
@@ -47,8 +50,8 @@ class GeneralSenderPipeline:
         if self.output_dst == "kafka":
             self.producer = KafkaProducer(
                 bootstrap_servers=self.kafka_servers,
-                value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-                key_serializer=lambda k: str(k).encode('utf-8')
+                value_serializer = lambda v: json.dumps(v).encode('utf-8'),
+                key_serializer = lambda k: str(k).encode('utf-8')
             )
 
             spider.logger.info(f"Kafka producer connected to: {self.kafka_servers}, topic: {self.kafka_topic}")
@@ -82,7 +85,7 @@ class GeneralSenderPipeline:
             if dashAddr is None:
                 raise ValueError("Missing required environment variables for dashboard")
                 os._exit(0)
-            requests.post(f"{dashAddr}/api/preview/{getattr(spider, 'job_id', 'default_job_id')}", headers = {'Content-Type': 'application/json'}, data = json.dumps(dict(item)))
+            requests.post(f"{dashAddr}/api/preview/{self.job_id}", headers = {'Content-Type': 'application/json'}, data = json.dumps(dict(item)))
             os._exit(0)
             
         if self.output_dst == 'kafka':

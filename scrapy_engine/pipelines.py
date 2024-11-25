@@ -1,4 +1,4 @@
-import json, os, sys, logging, requests, time
+import json, os, sys, logging, requests
 from datetime import datetime
 from threading import Thread, Event
 from kafka import KafkaProducer
@@ -22,6 +22,7 @@ class GeneralSenderPipeline:
         if self.preview:
             self.stop_event = Event()
             self.thread = Thread(target=self._log_crawl_count_periodically, args=(spider,))
+            self.thread.daemon = True
             self.thread.start()
 
         configure_logging(install_root_handler=False)
@@ -101,7 +102,7 @@ class GeneralSenderPipeline:
                 else:
                     self.first_item = False
 
-                line = json.dumps(urlparse(item['url']).path, indent = None)
+                line = json.dumps(item['url'], indent = None)
                 f.write(line)
 
         elif self.output_dst == 'local':
@@ -141,3 +142,4 @@ class GeneralSenderPipeline:
             if self.producer:
                 self.producer.close()
                 spider.logger.info("Kafka producer closed")
+        

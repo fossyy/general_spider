@@ -16,37 +16,31 @@ class GeneralEngineSpider(Spider):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
-        self.cookies: dict[str, str] = {}
         self.scraped_urls: list[str]= []
         self.output_dst: str = output_dst
         self.crawled_count: int = 0
         self.status_codes: dict[str, int] = {}
         self.job_id: str | None = kwargs.get('_job')
-        self.preview: str = preview
-        self.headers: dict[str, str] = {}           
-        self.proxies: bytes[list[str]] = proxies
-        self.cookies: bytes[dict[str, str]] = cookies
-        
-        if self.proxies is None:
-            raise ValueError("Proxies cannot be None")
-        self.proxies = json.loads(base64.b64decode(self.proxies).decode("utf-8"))    
-        
-        if self.cookies is not None:
-            self.cookies = json.loads(base64.b64decode(self.cookies).decode("utf-8"))
+        self.headers: dict[str, str] = {}
+        self.proxies: list[str] = []
+        self.cookies: dict[str, str] = {}
+        self.preview_proxies: list[str] = []
+        self.preview : str  = preview
+
+        if cookies is not None:
+            self.cookies = json.loads(base64.b64decode(cookies).decode("utf-8"))
 
         if self.job_id is None:
             self.job_id = ''.join(random.SystemRandom().choice(string.ascii_lowercase + string.digits) for _ in range(24))
 
         super().__init__(*args, **kwargs)
         if self.preview == "yes":
-            self.preview_config = preview_config
-            self.preview_proxies = preview_proxies
-            if self.preview_config is None:
+            if preview_config is None:
                 raise ValueError("preview_config cannot be None for preview run")
-            if self.preview_proxy is None:
+            if preview_proxies is None:
                 raise ValueError("preview_proxies cannot be None for preview run")
-            self.config = json.loads(base64.b64decode(self.preview_config).decode("utf-8"))
-            self.proxies = json.loads(base64.b64decode(self.preview_proxies).decode("utf-8"))
+            self.config = json.loads(base64.b64decode(preview_config).decode("utf-8"))
+            self.proxies = json.loads(base64.b64decode(preview_proxies).decode("utf-8"))
         else:
             load_dotenv()
             dbHost: str = os.environ.get('DB_HOST', None)
@@ -81,6 +75,10 @@ class GeneralEngineSpider(Spider):
                     self.cursor.close()
                 if self.conn:
                     self.conn.close()
+
+            if self.proxies is None:
+                raise ValueError("Proxies cannot be None")
+            self.proxies = json.loads(base64.b64decode(proxies).decode("utf-8"))
 
             self.base_url: str = self.config.get('base_url', '')
             if not self.base_url:

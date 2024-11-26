@@ -22,8 +22,13 @@ class GeneralSenderPipeline:
         self.job_id = getattr(spider, 'job_id', 'default_job_id')
         self.crawl_count = 0
         self.last_logged = datetime.now()
-        
-        if self.preview:
+
+        if self.preview == "yes":
+            self.dashAddr: str = os.environ.get('DASHBOARD_ADDRESS', None)
+            if self.dashAddr is None:
+                raise ValueError("Missing required environment variables for dashboard")
+            self.preview_is_send = False
+        else:
             self.stop_event = Event()
             self.thread = Thread(target=self._log_crawl_count_periodically, args=(spider,))
             self.thread.daemon = True
@@ -81,11 +86,8 @@ class GeneralSenderPipeline:
         self.crawl_count += 1
                   
         if self.preview is not None and self.preview == 'yes':
-            dashAddr: str = os.environ.get('DASHBOARD_ADDRESS', None)
-            if dashAddr is None:
-                raise ValueError("Missing required environment variables for dashboard")
-                os._exit(0)
-            requests.post(f"{dashAddr}/api/preview/{self.job_id}", headers = {'Content-Type': 'application/json'}, data = json.dumps(dict(item)))
+            requests.post(f"{self.dashAddr}/api/preview/{self.job_id}", headers = {'Content-Type': 'application/json'}, data = json.dumps(dict(item)))
+            self.preview_is_send = True
             os._exit(0)
             
         if self.output_dst == 'kafka':
@@ -135,12 +137,14 @@ class GeneralSenderPipeline:
             self.stop_event.wait(5)
 
     def close_spider(self, spider):
-        self.stop_event.set()
-        self.thread.join()
-
-        with open(self.output_file, 'a', encoding = 'utf-8') as f:
-            f.write(']')
-            
+        if self.preview == "yes":
+            if self.preview_is_send == False:
+                requests.post(f"{self.dashAddr}/api/preview/{self.job_id}", headers={'Content-Type': 'application/json'}, data=json.dumps(dict({"error": "Request might need additional Cookies"})))
+        else:
+            with open(self.output_file, 'a', encoding = 'utf-8') as f:
+                f.write(']')
+            self.stop_event.set()
+            self.thread.join()
         if self.output_dst == 'kafka':
             if self.producer:
                 self.producer.close()

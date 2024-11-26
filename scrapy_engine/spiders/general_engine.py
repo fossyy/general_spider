@@ -26,9 +26,11 @@ class GeneralEngineSpider(Spider):
         self.cookies: dict[str, str] = {}
         self.preview_proxies: list[str] = []
         self.preview : str  = preview
-
+        self.output_file: Path | str = ""
+        self.data: tuple | None = None
+        
         if cookies is not None:
-            self.cookies = json.loads(base64.b64decode(cookies).decode("utf-8"))
+            self.cookies = self.decode_base64(cookies)
 
         if self.job_id is None:
             self.job_id = ''.join(random.SystemRandom().choice(string.ascii_lowercase + string.digits) for _ in range(24))
@@ -39,8 +41,8 @@ class GeneralEngineSpider(Spider):
                 raise ValueError("preview_config cannot be None for preview run")
             if preview_proxies is None:
                 raise ValueError("preview_proxies cannot be None for preview run")
-            self.config = json.loads(base64.b64decode(preview_config).decode("utf-8"))
-            self.proxies = json.loads(base64.b64decode(preview_proxies).decode("utf-8"))
+            self.config = self.decode_base64(preview_config)
+            self.proxies = self.decode_base64(preview_proxies)
         else:
             load_dotenv()
             dbHost: str = os.environ.get('DB_HOST', None)
@@ -55,17 +57,28 @@ class GeneralEngineSpider(Spider):
             try:
                 self.conn = psycopg2.connect(conn_str)
                 self.cursor = self.conn.cursor()
-                self.cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
-                data: bytes = self.cursor.fetchone()[0]
-                if data is None:
-                    raise ValueError("Config not found")
+                self.cursor.execute("SELECT id, name, convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
+                self.data = self.cursor.fetchone()
+                if self.data is None:
+                    raise ValueError("data not found")
 
             except (Exception, psycopg2.DatabaseError) as error:
                 raise ConnectionError("Error while connecting to PostgreSQL", error)
 
             try:
-                self.config = json.loads(data)
+                self.config = json.loads(self.data[2])
                 self.headers = self.config.get('headers', {})
+                self.base_url: str = self.config.get('base_url', '')
+                if not self.base_url:
+                    raise ValueError("No base URL configured")
+                self.result_folder = Path(f"results/{urlparse(self.base_url).netloc if self.base_url is not None else 'default_output'}") 
+                self.result_folder.mkdir(parents=True, exist_ok=True) 
+                if self.output_dst == "local":   
+                    self.output_file = self.result_folder/f"local-{self.data[1]}-{self.data[0]}-result.json"
+                elif self.output_dst == "kafka":
+                    self.output_file = self.result_folder/f"kafka-{self.data[1]}-{self.data[0]}-result.json"
+                else:
+                    raise ValueError("Invalid output destination")
 
             except json.JSONDecodeError as e:
                 raise ValueError("Config not found")
@@ -78,15 +91,7 @@ class GeneralEngineSpider(Spider):
 
             if self.proxies is None:
                 raise ValueError("Proxies cannot be None")
-            self.proxies = json.loads(base64.b64decode(proxies).decode("utf-8"))
-
-            self.base_url: str = self.config.get('base_url', '')
-            if not self.base_url:
-                raise ValueError("No base URL configured")
-
-            self.result_folder = Path(f"results/{urlparse(self.base_url).netloc if self.base_url is not None else 'default_output'}") 
-            self.result_folder.mkdir(parents=True, exist_ok=True)    
-            self.output_file = self.result_folder/"result.json"
+            self.proxies = self.decode_base64(proxies)
             
             if self.output_file.exists():
                 try:
@@ -130,6 +135,9 @@ class GeneralEngineSpider(Spider):
         current_proxy_now = self.current_proxy % len(self.proxies)
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
+    
+    def decode_base64(self, data):
+        return json.loads(base64.b64decode(data).decode("utf-8"))
 
     def start_requests(self):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})

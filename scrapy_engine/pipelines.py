@@ -6,10 +6,106 @@ from kafka import KafkaProducer
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from logging.handlers import RotatingFileHandler
+
+from scrapy.exceptions import DropItem
 from scrapy.utils.log import configure_logging
 from pathlib import Path
 
 class GeneralSenderPipeline:
+
+    mapping = 	{
+	  "media_thumbnail": "",
+	  "friend_count": 0,
+	  "follower_count": 0,
+	  "sentiment": "",
+	  "timestamp": int(datetime.now().timestamp()),
+	  "lang": "en",
+	  "emotion": "",
+	  "user_location": [],
+	  "user_geo_location": [],
+	  "ann_geo_location": [],
+	  "workspace": "",
+	  "ann_person": [],
+	  "ann_location": [],
+	  "ann_organization": [],
+	  "content_image": [],
+	  "list_category": [],
+	  "hashtags": [],
+	  "group_member_count": 0,
+	  "page_member_count": 0,
+	  "reach": 0,
+	  "source": "deepweb",
+	  "content_stat": {
+	    "diggCount": 0,
+	    "shareCount": 0,
+	    "commentCount": 0,
+	    "playCount": 0
+	  },
+	  "detail_feature": {
+	    "product_type": "",
+	    "origin_country": "",
+	    "quantity_left": "",
+	    "ships_to": "",
+	    "payment": "",
+	    "category": "",
+	    "currency_symbol": "",
+	    "currency_value": 0,
+	    "currency_description": "",
+	    "unit": "",
+	    "unit_value": 0,
+	    "unit_description": ""
+	  },
+	  "global": {
+	    "view_count": 0,
+	    "share_count": 0,
+	    "reply_count": 0,
+	    "reach": 0,
+	    "quote_count": 0,
+	    "like_count": 0,
+	    "following_count": 0,
+	    "follower_count": 0,
+	    "engagement": 0,
+	    "timestamp": 0,
+	    "id": "",
+	    "user_id": "",
+	    "media_url": [],
+	    "media_type": "",
+	    "username": "",
+	    "name": "",
+	    "content": ""
+	  },
+	  "parent": {
+	    "view_count": 0,
+	    "share_count": 0,
+	    "reply_count": 0,
+	    "reach": 0,
+	    "quote_count": 0,
+	    "like_count": 0,
+	    "following_count": 0,
+	    "follower_count": 0,
+	    "engagement": 0,
+	    "timestamp": 0,
+	    "id": "",
+	    "user_id": "",
+	    "media_url": [],
+	    "media_type": "",
+	    "username": "",
+	    "name": "",
+	    "content": ""
+	  },
+	  "id": "",
+	  "content": "",
+	  "link": "",
+	  "user_image": "",
+	  "username": "",
+	  "name": "",
+	  "user_id": "",
+	  "media_url": [],
+	  "content_type": "",
+	  "media_type": "",
+	  "crawler_timestamp": int(datetime.now().timestamp()),
+	}
+
     def open_spider(self, spider):
         load_dotenv()
         self.kafka_servers = getattr(spider, 'KAFKA_BOOTSTRAP_SERVERS', None)
@@ -22,6 +118,7 @@ class GeneralSenderPipeline:
         self.job_id = getattr(spider, 'job_id', 'default_job_id')
         self.crawl_count = 0
         self.last_logged = datetime.now()
+        # self.crawled = []
 
         if self.preview == "yes":
             self.dashAddr: str = os.environ.get('DASHBOARD_ADDRESS', None)
@@ -82,9 +179,25 @@ class GeneralSenderPipeline:
                 with open(self.output_file, 'w', encoding = 'utf-8') as f:
                     f.write('[')
 
+    def update_mapping(self, mapping, key, value):
+        if isinstance(value, dict):
+            if key not in mapping:
+                mapping[key] = {}
+            for sub_key, sub_value in value.items():
+                mapping[key] = self.update_mapping(mapping[key], sub_key, sub_value)
+        else:
+            mapping[key] = value
+        return mapping
+
     def process_item(self, item, spider):
         self.crawl_count += 1
-                  
+
+        mapped_item = self.mapping
+        for key, value in item.items():
+            mapped_item = self.update_mapping(mapped_item, key, value)
+
+        mapped_item["crawler_timestamp"] = int(datetime.now().timestamp())
+
         if self.preview is not None and self.preview == 'yes':
             requests.post(f"{self.dashAddr}/api/preview/{self.job_id}", headers = {'Content-Type': 'application/json'}, data = json.dumps(dict(item)))
             self.preview_is_send = True
@@ -95,9 +208,9 @@ class GeneralSenderPipeline:
                 raise ValueError('kafka servers and topic must be specified')
 
             try:
-                self.producer.send(self.kafka_topic, value = dict(item))
+                self.producer.send(self.kafka_topic, value = dict(mapped_item))
                 self.producer.flush()
-                spider.logger.debug(f"Item sent to Kafka topic '{self.kafka_topic}': {item}")
+                spider.logger.debug(f"Item sent to Kafka topic '{self.kafka_topic}': {mapped_item}")
             except Exception as e:
                 spider.logger.error(f"Failed to send item to Kafka: {e}")
 
@@ -117,12 +230,12 @@ class GeneralSenderPipeline:
                 else:
                     self.first_item = False
 
-                line = json.dumps(dict(item), indent = None)
+                line = json.dumps(dict(mapped_item), indent = None)
                 f.write(line)
         else:
             spider.logger.info(f"No output destination")
-            
-        return item
+
+        return mapped_item
 
     def _log_crawl_count_periodically(self, spider):
         while not self.stop_event.is_set():

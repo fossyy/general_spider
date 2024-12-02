@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 class GeneralEngineSpider(Spider):
     name: str = "general_engine"
-    
+
     def __init__(self, config_id = None, output_dst = "local", kafka_server = None, kafka_topic = None, preview = "no", preview_config = None, proxies = None, preview_proxies = None, cookies = None, *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
@@ -28,7 +28,7 @@ class GeneralEngineSpider(Spider):
         self.preview : str  = preview
         self.output_file: Path | str = ""
         self.data: tuple | None = None
-        
+
         if cookies is not None:
             self.cookies = self.decode_base64(cookies)
 
@@ -71,9 +71,9 @@ class GeneralEngineSpider(Spider):
                 self.base_url: str = self.config.get('base_url', '')
                 if not self.base_url:
                     raise ValueError("No base URL configured")
-                self.result_folder = Path(f"results/{urlparse(self.base_url).netloc if self.base_url is not None else 'default_output'}") 
-                self.result_folder.mkdir(parents=True, exist_ok=True) 
-                if self.output_dst == "local":   
+                self.result_folder = Path(f"results/{urlparse(self.base_url).netloc if self.base_url is not None else 'default_output'}")
+                self.result_folder.mkdir(parents=True, exist_ok=True)
+                if self.output_dst == "local":
                     self.output_file = self.result_folder/f"local-{self.data[1]}-{self.data[0]}-result.json"
                 elif self.output_dst == "kafka":
                     self.output_file = self.result_folder/f"kafka-{self.data[1]}-{self.data[0]}-result.json"
@@ -82,7 +82,7 @@ class GeneralEngineSpider(Spider):
 
             except json.JSONDecodeError as e:
                 raise ValueError("Config not found")
-            
+
             finally:
                 if self.cursor:
                     self.cursor.close()
@@ -92,15 +92,15 @@ class GeneralEngineSpider(Spider):
             if self.proxies is None:
                 raise ValueError("Proxies cannot be None")
             self.proxies = self.decode_base64(proxies)
-            
+
             if self.output_file.exists():
                 try:
                     with open(self.output_file, "r") as f:
                         json_content = re.sub(r'},\s*]', '}]',
-                                       re.sub(r'},\s*}', '}}',  
-                                       re.sub(r',\s*]', ']', 
-                                       re.sub(r',\s*}', '}',   
-                                       re.sub(r'},\s*$', '}', 
+                                       re.sub(r'},\s*}', '}}',
+                                       re.sub(r',\s*]', ']',
+                                       re.sub(r',\s*}', '}',
+                                       re.sub(r'},\s*$', '}',
                                        f.read())))))
                         json_content += ']' if not json_content.strip().endswith(']') else ''
                         data = json.loads(json_content)
@@ -110,7 +110,7 @@ class GeneralEngineSpider(Spider):
                     else:
                         raise
                 except Exception as e:
-                    raise RuntimeError("Unknown error while reading output file")   
+                    raise RuntimeError("Unknown error while reading output file")
                 if isinstance(data, dict):
                     self.scraped_urls = [item["url"] for item in data]
                 elif isinstance(data, list):
@@ -129,20 +129,20 @@ class GeneralEngineSpider(Spider):
         if self.output_dst == "kafka":
             self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
             self.KAFKA_TOPIC = kafka_topic
-    
-    current_proxy: int = 0    
+
+    current_proxy: int = 0
     def get_proxy(self):
         current_proxy_now = self.current_proxy % len(self.proxies)
         self.current_proxy += 1
         return self.proxies[current_proxy_now]
-    
+
     def decode_base64(self, data):
         return json.loads(base64.b64decode(data).decode("utf-8"))
 
     def start_requests(self):
         yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
 
-    def parse_structure(self, response: Response, structure):
+    def parse_structure(self, response: Response, structure, nested=False):
         url: str = response.url
         if url not in self.items_collected:
             self.items_collected[url] = {"url": url}
@@ -201,27 +201,52 @@ class GeneralEngineSpider(Spider):
                     if data:
                         result.append(data)
                     try:
-                        self.items_collected[url][value.get("_key", "loop_data")] = result
+                        tag = value.get("_tag", None)
+                        key_to_use = value.get("_key", "loop_data")
+                        if tag is not None and tag != "":
+                            try:
+                                self.items_collected[url][tag].update({key_to_use: result})
+                            except KeyError:
+                                self.items_collected[url][tag] = ({key_to_use: result})
+                        else:
+                            self.items_collected[url][key_to_use] = result
                     except KeyError:
                         pass
 
             if "_pagination" in value:
                 next_page: str = response.xpath(value["_pagination"]).get()
                 if next_page:
-                    next_page_url = response.urljoin(next_page)
-                    self.log(f"Following pagination to: {next_page_url}")
+                    if response.url == f"{urlparse(url).scheme}://{urlparse(url).netloc}":
+                        if next_page.startswith('?'):
+                            next_page_url = response.urljoin("/"+next_page)
+                        else:
+                            next_page_url = response.urljoin(next_page)
+                    else:
+                        next_page_url = response.urljoin(next_page)
+                    self.logger.info(f"Following pagination to: {next_page_url}")
                     yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
 
-            if isinstance(value, dict):
-                yield from self.parse_structure(response, value)
 
-            elif isinstance(value, str) and key != "_pagination":
+            if isinstance(value, dict):
+                if not nested:
+                    yield from self.parse_structure(response, value, True)
+
+            elif isinstance(value, str) and key != "_pagination" and key != "_tag":
                 extracted_data: list[str] = [item.strip() for item in response.xpath(value).getall() if item.strip()]
                 if len(extracted_data) == 1:
                     extracted_data = response.xpath(value).get()
                 if extracted_data:
                     try:
-                        self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
+                        tag = structure.get("_tag", None)
+                        key_to_use = key if key[len(key) - 1] != "*" else key[:len(key) - 1]
+
+                        if tag is not None and tag != "":
+                            try:
+                                self.items_collected[url][tag].update({key_to_use: extracted_data})
+                            except KeyError:
+                                self.items_collected[url][tag] = ({key_to_use: extracted_data})
+                        else:
+                            self.items_collected[url][key_to_use] = extracted_data
                     except KeyError:
                         pass
                 elif not key.endswith("*") and key != "_pagination" and value != "_pagination":
@@ -240,19 +265,33 @@ class GeneralEngineSpider(Spider):
 
     def _is_data_complete(self, collected_data, structure, url):
         for key, value in structure.items():
-            if key.startswith(("_", "@")):
+            if key.startswith("_") and key != "_loop":
                 continue
 
-            is_optional: str = key.endswith("*")
-            key_base: str = key.rstrip("*") if is_optional else key
-
-            if key_base not in collected_data or collected_data[key_base] is None:
-                if not is_optional:
-                    self.log(f"Required key 3 '{key_base}' not in collected_data for url {url}")
-                return False
-
-            if isinstance(value, dict):
-                if not self._is_data_complete(collected_data.get(key_base, {}), value, url):
+            if key.startswith("@"):
+                tag_data = collected_data.get(value.get("_tag", key), {})
+                if not self._is_data_complete(tag_data, value, url):
                     return False
+
+            elif key == "_loop":
+                tag_data = collected_data.get(value.get("_tag", key), {})
+                if not self._is_data_complete(tag_data, value, url):
+                    return False
+
+            elif key.endswith("*"):
+                key_base = key.rstrip("*")
+                if key_base in collected_data:
+                    if isinstance(value, dict):
+                        if not self._is_data_complete(collected_data[key_base], value, url):
+                            return False
+                continue
+
+            else:
+                if key not in collected_data or collected_data[key] is None:
+                    return False
+
+                if isinstance(value, dict):
+                    if not self._is_data_complete(collected_data[key], value, url):
+                        return False
 
         return True

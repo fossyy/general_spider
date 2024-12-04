@@ -6,8 +6,6 @@ from kafka import KafkaProducer
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from logging.handlers import RotatingFileHandler
-
-from scrapy.exceptions import DropItem
 from scrapy.utils.log import configure_logging
 from pathlib import Path
 
@@ -118,7 +116,6 @@ class GeneralSenderPipeline:
         self.job_id = getattr(spider, 'job_id', 'default_job_id')
         self.crawl_count = 0
         self.last_logged = datetime.now()
-        # self.crawled = []
 
         if self.preview == "yes":
             self.dashAddr: str = os.environ.get('DASHBOARD_ADDRESS', None)
@@ -220,7 +217,7 @@ class GeneralSenderPipeline:
                 else:
                     self.first_item = False
 
-                line = json.dumps(item['url'], indent = None)
+                line = json.dumps(item['link'], indent = None)
                 f.write(line)
 
         elif self.output_dst == 'local':

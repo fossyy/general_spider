@@ -1,0 +1,88 @@
+{
+  "base_url": "http://bbzzzsvqcrqtki6umym6itiixfhni37ybtt7mkbjyxn2pgllzxf2qgyd.onion/threads/can-we-use-heater-for-4mmc-recrystallization.13679/",
+  "structure": {
+    "@thread": {
+      "_tag": "root",
+      "content": {
+        "value": "string((//article[contains(@class, 'js-post ')])[1]//div[@class='bbWrapper'])",
+        "optional": false,
+        "type": "str"
+      },
+      "username": {
+        "value": "string((//article[contains(@class, 'js-post ')])[1]//a[@class='username '])",
+        "optional": true,
+        "type": "str"
+      },
+      "_loop": {
+        "_element": "//div[@class='block-body js-replyNewMessageContainer']//article[position()>1]",
+        "_key": "thread_reply",
+        "_tag": "global",
+        "id": {
+          "value": "./@data-content",
+          "optional": false,
+          "type": "str"
+        },
+        "username": {
+          "value": ".//h4[contains(@class, 'message-name')]//a/text()",
+          "optional": false,
+          "type": "str"
+        },
+        "content": {
+          "value": "string(.//div[@class='bbWrapper'])",
+          "optional": false,
+          "type": "str"
+        },
+        "timestamp": {
+          "value": ".//time[@class='u-dt']/@datetime",
+          "optional": false,
+          "type": "timestamp"
+        },
+        "media_url": {
+          "value": ".//img/@src | .//video/source/@src",
+          "optional": true,
+          "type": "list"
+        },
+        "name": {
+          "value": ".//div[contains(@class, 'message-userDetails')]/h5[@class='userTitle']/text()",
+          "optional": false,
+          "type": "str"
+        },
+        "_loop": {
+          "_element": ".//div[@class='message-inner']//article[contains(@class, 'message message--post')]",
+          "_key": "thread_comment_reply",
+          "_tag": "parent",
+          "id": {
+            "value": "./@data-content",
+            "optional": false,
+            "type": "str"
+          },
+          "username": {
+            "value": ".//h4[contains(@class, 'message-name')]//a/text()",
+            "optional": false,
+            "type": "str"
+          },
+          "content": {
+            "value": "string(.//div[@class='bbWrapper'])",
+            "optional": false,
+            "type": "str"
+          },
+          "timestamp": {
+            "value": ".//time[@class='u-dt']/@datetime",
+            "optional": false,
+            "type": "str"
+          },
+          "media_url": {
+            "value": ".//img/@src | .//video/source/@src",
+            "optional": false,
+            "type": "str"
+          },
+          "name": {
+            "value": ".//div[contains(@class, 'message-userDetails')]/h5[@class='userTitle']/text()",
+            "optional": false,
+            "type": "str"
+          }
+        }
+      }
+    }
+  }
+}

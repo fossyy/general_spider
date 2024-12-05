@@ -6,8 +6,6 @@ from kafka import KafkaProducer
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from logging.handlers import RotatingFileHandler
-
-from scrapy.exceptions import DropItem
 from scrapy.utils.log import configure_logging
 from pathlib import Path
 
@@ -18,7 +16,7 @@ class GeneralSenderPipeline:
 	  "friend_count": 0,
 	  "follower_count": 0,
 	  "sentiment": "",
-	  "timestamp": int(datetime.now().timestamp()),
+	  "timestamp": 0,
 	  "lang": "en",
 	  "emotion": "",
 	  "user_location": [],
@@ -34,7 +32,7 @@ class GeneralSenderPipeline:
 	  "group_member_count": 0,
 	  "page_member_count": 0,
 	  "reach": 0,
-	  "source": "deepweb",
+	  "source": "",
 	  "content_stat": {
 	    "diggCount": 0,
 	    "shareCount": 0,
@@ -103,7 +101,7 @@ class GeneralSenderPipeline:
 	  "media_url": [],
 	  "content_type": "",
 	  "media_type": "",
-	  "crawler_timestamp": int(datetime.now().timestamp()),
+	  "crawler_timestamp": 0,
 	}
 
     def open_spider(self, spider):
@@ -118,7 +116,6 @@ class GeneralSenderPipeline:
         self.job_id = getattr(spider, 'job_id', 'default_job_id')
         self.crawl_count = 0
         self.last_logged = datetime.now()
-        # self.crawled = []
 
         if self.preview == "yes":
             self.dashAddr: str = os.environ.get('DASHBOARD_ADDRESS', None)
@@ -196,7 +193,7 @@ class GeneralSenderPipeline:
         for key, value in item.items():
             mapped_item = self.update_mapping(mapped_item, key, value)
 
-        mapped_item["crawler_timestamp"] = int(datetime.now().timestamp())
+        mapped_item["crawler_timestamp"] = int(datetime.now().timestamp() * 1000)
 
         if self.preview is not None and self.preview == 'yes':
             requests.post(f"{self.dashAddr}/api/preview/{self.job_id}", headers = {'Content-Type': 'application/json'}, data = json.dumps(dict(item)))
@@ -220,7 +217,7 @@ class GeneralSenderPipeline:
                 else:
                     self.first_item = False
 
-                line = json.dumps(item['url'], indent = None)
+                line = json.dumps(item['link'], indent = None)
                 f.write(line)
 
         elif self.output_dst == 'local':

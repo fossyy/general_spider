@@ -1,5 +1,6 @@
 import hashlib
 import json, psycopg2, os, random, string, base64, re, dateparser
+import time
 
 from typing import Any
 from scrapy import Request, Spider
@@ -178,6 +179,7 @@ class GeneralEngineSpider(Spider):
     def handle_loop(self, response: Response, loop_structure: dict, base_url: str, parent_data: dict):
         loop_elements = response.xpath(loop_structure["_element"])
         tag = loop_structure.get("_tag", None)
+        filtered_root_data = {}
 
         for idx, element in enumerate(loop_elements):
             loop_result = {"link": base_url, "global": {}, "parent": {}}
@@ -190,15 +192,14 @@ class GeneralEngineSpider(Spider):
                     extracted_data = None
                     data_type = sub_value["type"]
                     xpath_value = sub_value["value"]
-
-                    root_key = f"{base_url}@root"
-                    if root_key in self.items_collected:
-                        root_data = self.items_collected[root_key]
-                        filtered_root_data = {
-                            key: value for key, value in root_data.items()
-                            if key not in ["global", "parent", "content_stat", "detail_feature"]
-                        }
-                        parent_data.update(filtered_root_data)
+                    if parent_data is not loop_result:
+                        if base_url in self.items_collected:
+                            root_data = self.items_collected[base_url]
+                            filtered_root_data = {
+                                key: value for key, value in root_data.items()
+                                if key not in ["global", "parent", "content_stat", "detail_feature"]
+                            }
+                            parent_data.update(filtered_root_data)
 
                     try:
                         if data_type == "str":
@@ -218,23 +219,25 @@ class GeneralEngineSpider(Spider):
                     if tag == "root":
                         loop_result[sub_key] = extracted_data
                         loop_result["global"][sub_key] = extracted_data
+                        loop_result["parent"][sub_key] = extracted_data
                     elif tag == "global":
                         loop_result["global"][sub_key] = extracted_data
-                        loop_result["parent"] = parent_data.get("global", {}).copy()
+                        loop_result["parent"][sub_key] = extracted_data
                     elif tag == "parent":
                         loop_result["parent"][sub_key] = extracted_data
                         loop_result["global"] = parent_data.get("global", {}).copy()
 
                 elif sub_key == "_loop":
                     yield from self.handle_loop(element, sub_value, base_url, loop_result)
+            if filtered_root_data:
+                loop_result.update(filtered_root_data)
+            yield loop_result
 
-            loop_result.update(filtered_root_data)
-
-            unique_key = f"{base_url}@{tag}@{idx}" if tag else f"{base_url}@root@{idx}"
-            if unique_key not in self.items_collected:
-                self.items_collected[unique_key] = loop_result
-                yield loop_result
-
+        if parent_data is not None and "_loop" not in loop_structure.keys():
+            try:
+                self.items_collected.pop(base_url)
+            except KeyError:
+                pass
     def parse_structure(self, response: Response, structure, nested=False, url=None, loop_data=None, caller_key=None):
         if url is None:
             url: str = response.url
@@ -253,11 +256,10 @@ class GeneralEngineSpider(Spider):
                                               cookies=self.cookies, cb_kwargs={"structure": value},
                                               meta={'proxy': self._get_proxy()})
 
-
             elif "_loop" in key:
                 if "_element" not in value:
                     raise ValueError("Missing '_element' key in loop configuration.")
-                yield from self.handle_loop(response, value, url, self.items_collected[f"{url}@root"] or result)
+                yield from self.handle_loop(response, value, url, self.items_collected[url] or result)
 
             if "_pagination" in key:
                 next_page: str = response.xpath(value).get()
@@ -285,15 +287,13 @@ class GeneralEngineSpider(Spider):
                     result=result,
                     loop_data=loop_data,
                 )
-                unique_key = f"{url}@{tag}"
-                self.items_collected[unique_key] = result
+                self.items_collected[url] = result
 
             if isinstance(value, dict):
                 if not nested:
                     yield from self.parse_structure(response, value, nested=True, caller_key=key)
 
         if result != {"link": url, "global": {}, "parent": {}}:
-            print("yielding : ", result)
             try:
                 yield result
             except Exception as e:

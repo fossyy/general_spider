@@ -1,6 +1,4 @@
-import hashlib
 import json, psycopg2, os, random, string, base64, re, dateparser
-import time
 
 from typing import Any
 from scrapy import Request, Spider
@@ -15,8 +13,7 @@ from urllib.parse import urlparse
 class GeneralEngineSpider(Spider):
     name: str = "general_engine"
 
-    def __init__(self, config_id=None, output_dst="local", kafka_server=None, kafka_topic=None, preview="no",
-                 preview_config=None, proxies=None, preview_proxies=None, cookies=None, *args, **kwargs):
+    def __init__(self, config_id=None, output_dst="local", kafka_server=None, kafka_topic=None, preview="no", preview_config=None, proxies=None, preview_proxies=None, cookies=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.conn: connection | None = None
@@ -41,7 +38,7 @@ class GeneralEngineSpider(Spider):
             self._initialize_database(config_id)
 
         if self.output_dst == "kafka":
-            self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
+            self.KAFKA_BOOTSTRAP_SERVERS = self._decode_base64(kafka_server)
             self.KAFKA_TOPIC = kafka_topic
 
     def _initialize_preview(self, preview_config, preview_proxies):
@@ -87,14 +84,25 @@ class GeneralEngineSpider(Spider):
         if self.output_file.exists():
             try:
                 with open(self.output_file, "r") as f:
-                    json_content = re.sub(r'},\s*]', '}]',
-                                          re.sub(r'},\s*}', '}}',
-                                                 re.sub(r',\s*]', ']',
-                                                        re.sub(r',\s*}', '}',
-                                                               re.sub(r'},\s*$', '}',
-                                                                      f.read())))))
-                    json_content += ']' if not json_content.strip().endswith(']') else ''
-                    data = json.loads(json_content)
+                    json_content = f.read()
+                patterns_replacements = [
+                    (r'},\s*]', '}]'),      
+                    (r'},\s*}', '}}'),      
+                    (r',\s*]', ']'),        
+                    (r',\s*}', '}'),        
+                    (r'},\s*$', '}'),       
+                    (r'^\[\s*,', '['),      
+                ]
+                for pattern, replacement in patterns_replacements:
+                    json_content = re.sub(pattern, replacement, json_content)
+                
+                json_content = json_content.strip()
+                if json_content.startswith("[,") or json_content == "[,\n":
+                    json_content = "[" 
+                if not json_content.endswith(']'):
+                    json_content += ']'
+
+                data = json.loads(json_content)
             except json.JSONDecodeError as e:
                 if "Expecting ',' delimiter" in str(e):
                     raise ValueError(f"Invalid JSON format: {e}")
@@ -106,10 +114,9 @@ class GeneralEngineSpider(Spider):
                 self.scraped_urls = [item["link"] for item in data]
             elif isinstance(data, list):
                 for sub_data in data:
-                    if isinstance(sub_data, dict) and "link" in sub_data:
-                        self.scraped_urls.append(sub_data["link"])
-                    else:
-                        self.scraped_urls.append(sub_data)
+                    link = sub_data["link"] if isinstance(sub_data, dict) and "link" in sub_data else sub_data
+                    if link not in self.scraped_urls:
+                        self.scraped_urls.append(link)
             else:
                 raise ValueError("Invalid data format in output file")
         else:
@@ -139,11 +146,9 @@ class GeneralEngineSpider(Spider):
         return self.proxies[current_proxy_now]
 
     def start_requests(self):
-        yield Request(url=self.config['base_url'] + '/', callback=self.parse_structure,
-                      headers=self.config.get('headers', {}), cookies=self.cookies,
-                      cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy()})
+        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy()})
 
-    def handle_data_extraction(self, response: Response, key: str, value: dict, tag: str, url: str, result: dict, loop_data: dict):
+    def handle_data_extraction(self, response: Response, key: str, value: dict, tag: str, result: dict, loop_data: dict):
         extracted_data = None
         value_type = value.get('type')
         xpath_value = value.get('value')
@@ -157,6 +162,8 @@ class GeneralEngineSpider(Spider):
                 extracted_data = int(dateparser.parse(date).timestamp() * 1000) if date else None
             elif value_type == 'list':
                 extracted_data = response.xpath(xpath_value).getall()
+            elif value_type == "constraint":
+                extracted_data = xpath_value
         except Exception as e:
             self.logger.exception(f"Error extracting data for key {key}: {e}")
             return result
@@ -213,6 +220,8 @@ class GeneralEngineSpider(Spider):
                                 dateparser.parse(raw_data).timestamp() * 1000) if raw_data else None
                         elif data_type == "list":
                             extracted_data = element.xpath(xpath_value).getall()
+                        elif value_type == "constraint":
+                            extracted_data = xpath_value
                     except (ValueError, TypeError):
                         extracted_data = None
 
@@ -251,10 +260,7 @@ class GeneralEngineSpider(Spider):
                 list_xpath: str = value.get("_element")
                 if list_xpath:
                     for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
-                        self.logger.info(f"Found link: {link_url}")
-                        yield response.follow(link_url, self.parse_structure, headers=self.config.get('headers', {}),
-                                              cookies=self.cookies, cb_kwargs={"structure": value},
-                                              meta={'proxy': self._get_proxy()})
+                        yield response.follow(link_url, self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self._get_proxy()})
 
             elif "_loop" in key:
                 if "_element" not in value:
@@ -272,21 +278,11 @@ class GeneralEngineSpider(Spider):
                     else:
                         next_page_url = response.urljoin(next_page)
                     self.logger.info(f"Following pagination to: {next_page_url}")
-                    yield response.follow(url=next_page_url, callback=self.parse_structure,
-                                          headers=self.config.get('headers', {}), cookies=self.cookies,
-                                          cb_kwargs={"structure": structure}, meta={'proxy': self._get_proxy()})
+                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self._get_proxy()})
 
             if isinstance(value, dict) and {'value', 'type'}.issubset(value.keys()) and key != "_loop" and caller_key != "_loop":
                 tag = structure.get("_tag", None)
-                result = self.handle_data_extraction(
-                    response=response,
-                    key=key,
-                    value=value,
-                    tag=tag,
-                    url=url,
-                    result=result,
-                    loop_data=loop_data,
-                )
+                result = self.handle_data_extraction(response=response, key=key, value=value, tag=tag, result=result, loop_data=loop_data)
                 self.items_collected[url] = result
 
             if isinstance(value, dict):

@@ -28,3 +28,4 @@ logs
 *.old
 .idea/
 .env
+.sql

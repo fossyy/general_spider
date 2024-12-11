@@ -1,4 +1,6 @@
+import hashlib
 import json, psycopg2, os, random, string, base64, re, dateparser
+import time
 
 from typing import Any
 from scrapy import Request, Spider
@@ -13,7 +15,8 @@ from urllib.parse import urlparse
 class GeneralEngineSpider(Spider):
     name: str = "general_engine"
 
-    def __init__(self, config_id=None, output_dst="local", kafka_server=None, kafka_topic=None, preview="no", preview_config=None, proxies=None, preview_proxies=None, cookies=None, *args, **kwargs):
+    def __init__(self, config_id=None, output_dst="local", kafka_server=None, kafka_topic=None, preview="no",
+                 preview_config=None, proxies=None, preview_proxies=None, cookies=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.conn: connection | None = None
@@ -38,7 +41,7 @@ class GeneralEngineSpider(Spider):
             self._initialize_database(config_id)
 
         if self.output_dst == "kafka":
-            self.KAFKA_BOOTSTRAP_SERVERS = self._decode_base64(kafka_server)
+            self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
             self.KAFKA_TOPIC = kafka_topic
 
     def _initialize_preview(self, preview_config, preview_proxies):
@@ -86,19 +89,19 @@ class GeneralEngineSpider(Spider):
                 with open(self.output_file, "r") as f:
                     json_content = f.read()
                 patterns_replacements = [
-                    (r'},\s*]', '}]'),      
-                    (r'},\s*}', '}}'),      
-                    (r',\s*]', ']'),        
-                    (r',\s*}', '}'),        
-                    (r'},\s*$', '}'),       
-                    (r'^\[\s*,', '['),      
+                    (r'},\s*]', '}]'),
+                    (r'},\s*}', '}}'),
+                    (r',\s*]', ']'),
+                    (r',\s*}', '}'),
+                    (r'},\s*$', '}'),
+                    (r'^\[\s*,', '['),
                 ]
                 for pattern, replacement in patterns_replacements:
                     json_content = re.sub(pattern, replacement, json_content)
-                
+
                 json_content = json_content.strip()
                 if json_content.startswith("[,") or json_content == "[,\n":
-                    json_content = "[" 
+                    json_content = "["
                 if not json_content.endswith(']'):
                     json_content += ']'
 
@@ -146,13 +149,21 @@ class GeneralEngineSpider(Spider):
         return self.proxies[current_proxy_now]
 
     def start_requests(self):
-        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy()})
+        yield Request(url=self.config['base_url'] , callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy()})
 
-    def handle_data_extraction(self, response: Response, key: str, value: dict, tag: str, result: dict, loop_data: dict):
+    def handle_data_extraction(self, response: Response, key: str, value: dict, tag: str, result: dict, base_url: str, parent_data: dict):
         extracted_data = None
+        filtered_root_data = {}
         value_type = value.get('type')
         xpath_value = value.get('value')
-
+        if parent_data is not result or parent_data is not None:
+            if base_url in self.items_collected:
+                root_data = self.items_collected[base_url]
+                filtered_root_data = {
+                    key: value for key, value in root_data.items()
+                    if key not in ["global", "parent", "content_stat", "detail_feature"]
+                }
+                parent_data.update(filtered_root_data)
         try:
             if value_type in [None, 'str', 'int']:
                 raw_data = response.xpath(xpath_value).get()
@@ -173,21 +184,29 @@ class GeneralEngineSpider(Spider):
             result['global'][key] = extracted_data
             result['parent'][key] = extracted_data
         elif tag == 'global':
-            if loop_data:
-                loop_data['global'][key] = extracted_data
             result['global'][key] = extracted_data
-        elif tag == 'parent':
-            if loop_data:
-                loop_data['parent'][key] = extracted_data
             result['parent'][key] = extracted_data
+        elif tag == 'parent':
+            if parent_data:
+                result['parent'][key] = extracted_data
+                result['global'] = parent_data.get('global', {}).copy()
+            else:
+                result['parent'][key] = extracted_data
+                result['global'][key] = extracted_data
 
+        if filtered_root_data:
+            result.update(filtered_root_data)
+
+        if parent_data is not None and "_loop" not in value.keys():
+            try:
+                self.items_collected.pop(base_url)
+            except KeyError:
+                pass
         return result
 
     def handle_loop(self, response: Response, loop_structure: dict, base_url: str, parent_data: dict):
         loop_elements = response.xpath(loop_structure["_element"])
-        tag = loop_structure.get("_tag", None)
-        filtered_root_data = {}
-
+        tag = loop_structure.get("_tag", "root")
         for idx, element in enumerate(loop_elements):
             loop_result = {"link": base_url, "global": {}, "parent": {}}
 
@@ -196,9 +215,6 @@ class GeneralEngineSpider(Spider):
                     continue
 
                 if isinstance(sub_value, dict) and {"value", "type"}.issubset(sub_value.keys()):
-                    extracted_data = None
-                    data_type = sub_value["type"]
-                    xpath_value = sub_value["value"]
                     if parent_data is not loop_result:
                         if base_url in self.items_collected:
                             root_data = self.items_collected[base_url]
@@ -208,38 +224,9 @@ class GeneralEngineSpider(Spider):
                             }
                             parent_data.update(filtered_root_data)
 
-                    try:
-                        if data_type == "str":
-                            extracted_data = element.xpath(xpath_value).get()
-                        elif data_type == "int":
-                            raw_data = element.xpath(xpath_value).get()
-                            extracted_data = int(raw_data) if raw_data else None
-                        elif data_type == "timestamp":
-                            raw_data = element.xpath(xpath_value).get()
-                            extracted_data = int(
-                                dateparser.parse(raw_data).timestamp() * 1000) if raw_data else None
-                        elif data_type == "list":
-                            extracted_data = element.xpath(xpath_value).getall()
-                        elif value_type == "constraint":
-                            extracted_data = xpath_value
-                    except (ValueError, TypeError):
-                        extracted_data = None
-
-                    if tag == "root":
-                        loop_result[sub_key] = extracted_data
-                        loop_result["global"][sub_key] = extracted_data
-                        loop_result["parent"][sub_key] = extracted_data
-                    elif tag == "global":
-                        loop_result["global"][sub_key] = extracted_data
-                        loop_result["parent"][sub_key] = extracted_data
-                    elif tag == "parent":
-                        loop_result["parent"][sub_key] = extracted_data
-                        loop_result["global"] = parent_data.get("global", {}).copy()
-
+                    loop_result = self.handle_data_extraction(element, sub_key, sub_value, tag, loop_result, base_url, parent_data)
                 elif sub_key == "_loop":
                     yield from self.handle_loop(element, sub_value, base_url, loop_result)
-            if filtered_root_data:
-                loop_result.update(filtered_root_data)
             yield loop_result
 
         if parent_data is not None and "_loop" not in loop_structure.keys():
@@ -260,6 +247,7 @@ class GeneralEngineSpider(Spider):
                 list_xpath: str = value.get("_element")
                 if list_xpath:
                     for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
+                        self.logger.info(f"Found link: {link_url}")
                         yield response.follow(link_url, self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self._get_proxy()})
 
             elif "_loop" in key:
@@ -282,7 +270,7 @@ class GeneralEngineSpider(Spider):
 
             if isinstance(value, dict) and {'value', 'type'}.issubset(value.keys()) and key != "_loop" and caller_key != "_loop":
                 tag = structure.get("_tag", None)
-                result = self.handle_data_extraction(response=response, key=key, value=value, tag=tag, result=result, loop_data=loop_data)
+                result = self.handle_data_extraction(response=response, key=key, value=value, tag=tag, result=result, base_url=response.url, parent_data=result)
                 self.items_collected[url] = result
 
             if isinstance(value, dict):

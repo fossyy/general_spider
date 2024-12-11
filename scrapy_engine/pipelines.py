@@ -176,23 +176,22 @@ class GeneralSenderPipeline:
                 with open(self.output_file, 'w', encoding = 'utf-8') as f:
                     f.write('[')
 
-    def update_mapping(self, mapping, key, value):
-        if isinstance(value, dict):
-            if key not in mapping:
-                mapping[key] = {}
-            for sub_key, sub_value in value.items():
-                mapping[key] = self.update_mapping(mapping[key], sub_key, sub_value)
-        else:
-            mapping[key] = value
-        return mapping
+    def map_data_to_mapping(self, data, mapping_template):
+        for key, value in data.items():
+            if key in mapping_template:
+                if isinstance(mapping_template[key], dict) and isinstance(value, dict):
+                    self.map_data_to_mapping(value, mapping_template[key])
+                else:
+                    mapping_template[key] = value
+            else:
+                mapping_template[key] = value
+        return mapping_template
 
     def process_item(self, item, spider):
         self.crawl_count += 1
 
         mapped_item = self.mapping
-        for key, value in item.items():
-            mapped_item = self.update_mapping(mapped_item, key, value)
-
+        mapped_item = self.map_data_to_mapping(item, mapped_item)
         mapped_item["crawler_timestamp"] = int(datetime.now().timestamp() * 1000)
 
         if self.preview is not None and self.preview == 'yes':

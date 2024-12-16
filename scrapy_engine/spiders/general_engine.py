@@ -41,7 +41,7 @@ class GeneralEngineSpider(Spider):
             self._initialize_database(config_id)
 
         if self.output_dst == "kafka":
-            self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
+            self.KAFKA_BOOTSTRAP_SERVERS = self._decode_base64(kafka_server)
             self.KAFKA_TOPIC = kafka_topic
 
     def _initialize_preview(self, preview_config, preview_proxies):
@@ -163,7 +163,6 @@ class GeneralEngineSpider(Spider):
                     key: value for key, value in root_data.items()
                     if key not in ["global", "parent", "content_stat", "detail_feature"]
                 }
-                parent_data.update(filtered_root_data)
         try:
             if value_type in [None, 'str', 'int']:
                 raw_data = response.xpath(xpath_value).get()
@@ -181,21 +180,35 @@ class GeneralEngineSpider(Spider):
 
         if tag == 'root':
             result[key] = extracted_data
-            result['global'][key] = extracted_data
-            result['parent'][key] = extracted_data
+            if key not in ["global", "parent", "content_stat", "detail_feature"]:
+                result['parent'][key] = parent_data.get(key)
         elif tag == 'global':
             result['global'][key] = extracted_data
-            result['parent'][key] = extracted_data
-        elif tag == 'parent':
-            if parent_data:
+            parent_data = parent_data.get('parent', {})
+            if parent_data == {} or key not in parent_data:
                 result['parent'][key] = extracted_data
-                result['global'] = parent_data.get('global', {}).copy()
             else:
-                result['parent'][key] = extracted_data
-                result['global'][key] = extracted_data
+                result['parent'][key] = parent_data.get(key)
 
-        if filtered_root_data:
-            result.update(filtered_root_data)
+            if filtered_root_data == {} or key not in filtered_root_data:
+                result[key] = extracted_data
+            else:
+                result[key] = filtered_root_data[key]
+                result['parent'][key] = extracted_data
+        elif tag == 'parent':
+            if key not in filtered_root_data:
+                result[key] = extracted_data
+
+            global_parent_data = parent_data.get('global', {})
+            if key not in global_parent_data:
+                result['global'][key] = extracted_data
+            else:
+                result['global'][key] = global_parent_data.get(key)
+
+            if key not in result['parent']:
+                result['parent'][key] = extracted_data
+            else:
+                result['parent'][key] = parent_data.get('parent', {}).get(key)
 
         if parent_data is not None and "_loop" not in value.keys():
             try:
@@ -217,16 +230,18 @@ class GeneralEngineSpider(Spider):
                 if isinstance(sub_value, dict) and {"value", "type"}.issubset(sub_value.keys()):
                     if parent_data is not loop_result:
                         if base_url in self.items_collected:
-                            root_data = self.items_collected[base_url]
-                            filtered_root_data = {
-                                key: value for key, value in root_data.items()
-                                if key not in ["global", "parent", "content_stat", "detail_feature"]
-                            }
+                            filtered_root_data = self.items_collected[base_url]
                             parent_data.update(filtered_root_data)
 
                     loop_result = self.handle_data_extraction(element, sub_key, sub_value, tag, loop_result, base_url, parent_data)
                 elif sub_key == "_loop":
                     yield from self.handle_loop(element, sub_value, base_url, loop_result)
+
+            try:
+                if loop_result['content'] == loop_result["parent"]['content']:
+                    loop_result['parent'] = loop_result["global"].copy()
+            except KeyError:
+                pass
             yield loop_result
 
         if parent_data is not None and "_loop" not in loop_structure.keys():

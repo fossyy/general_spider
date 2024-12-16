@@ -1,0 +1,111 @@
+{
+  "base_url": "http://bbzzzsvqcrqtki6umym6itiixfhni37ybtt7mkbjyxn2pgllzxf2qgyd.onion",
+  "structure": {
+    "@landing_page": {
+      "_tag": "",
+      "_list": {
+        "_element": "//h3[@class='node-title']//a/@href",
+        "@thread_topic": {
+          "_tag": "",
+          "_pagination": "(//a[contains(@class, 'pageNav-jump pageNav-jump--next')]/@href)[1]",
+          "_list": {
+            "_element": "//div[contains(@class, 'structItem--thread')]//div[@class='structItem-title']/a/@href",
+            "_pagination": "(//a[contains(@class, 'pageNav-jump pageNav-jump--next')]/@href)[1]",
+            "@thread": {
+              "_tag": "global",
+              "source": {
+                "value": "deepweb",
+                "type": "constraint"
+              },
+              "name": {
+                "value": "//h1[@class='p-title-value']/text()",
+                "optional": false,
+                "type": "str"
+              },
+              "timestamp": {
+                "value": "//div[@class='p-body-header']//time/@title",
+                "optional": false,
+                "type": "timestamp"
+              },
+              "content": {
+                "value": "string((//article[contains(@class, 'js-post ')])[1]//div[@class='bbWrapper'])",
+                "optional": false,
+                "type": "str"
+              },
+              "username": {
+                "value": "string((//article[contains(@class, 'js-post ')])[1]//a[@class='username '])",
+                "optional": true,
+                "type": "str"
+              },
+              "media_url": {
+                "value": "(//article[contains(@class, 'js-post ')])[1]//div[@class='bbWrapper']//img/@src | (//article[contains(@class, 'js-post ')])[1]//div[@class='bbWrapper']//video/source/@src ",
+                "optional": false,
+                "type": "list"
+              },
+              "_loop": {
+                "_element": "(//article[not(ancestor::div[contains(@class, 'js-tprReplyMessageContainer')]) and not(contains(@class, 'message-body'))])[position()>1]",
+                "_key": "thread_reply",
+                "_tag": "parent",
+                "id": {
+                  "value": "(./@data-content)[1]",
+                  "optional": false,
+                  "type": "str"
+                },
+                "username": {
+                  "value": "(.//a[contains(@class, 'username')]/text() | .//a[contains(@class, 'username')]/span/text())[1]",
+                  "optional": false,
+                  "type": "str"
+                },
+                "content": {
+                  "value": "string((.//div[@class='bbWrapper'])[1])",
+                  "optional": false,
+                  "type": "str"
+                },
+                "timestamp": {
+                  "value": "(.//div[@class='meta-date']/@title)[1]",
+                  "optional": false,
+                  "type": "timestamp"
+                },
+                "media_url": {
+                  "value": "(.//img/@src | .//video/source/@src)[1]",
+                  "optional": true,
+                  "type": "list"
+                },
+                "_loop": {
+                  "_element": ".//div[@class='message-inner']//article[contains(@class, 'message message--post')]",
+                  "_key": "thread_comment_reply",
+                  "_tag": "root",
+                  "id": {
+                    "value": "./@data-content",
+                    "optional": false,
+                    "type": "str"
+                  },
+                  "username": {
+                    "value": "(.//a[contains(@class, 'username')]/text() | .//a[contains(@class, 'username')]/span/text())[1]",
+                    "optional": false,
+                    "type": "str"
+                  },
+                  "content": {
+                    "value": "string(.//div[@class='bbWrapper'])",
+                    "optional": false,
+                    "type": "str"
+                  },
+                  "timestamp": {
+                    "value": ".//div[@class='meta-date']/@title",
+                    "optional": false,
+                    "type": "timestamp"
+                  },
+                  "media_url": {
+                    "value": ".//img/@src | .//video/source/@src",
+                    "optional": true,
+                    "type": "list"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

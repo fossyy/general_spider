@@ -1,118 +1,259 @@
-import json, psycopg2 , os, random, string
+import hashlib
+import json, psycopg2, os, random, string, base64, re, dateparser
+import time
 
 from typing import Any
 from scrapy import Request, Spider
 from scrapy.http import Response
 from twisted.web.http import urlparse
+from dotenv import load_dotenv
 from psycopg2._psycopg import connection, cursor as cursortype
+from pathlib import Path
 from urllib.parse import urlparse
 
+
 class GeneralEngineSpider(Spider):
-    name = "general_engine"
+    name: str = "general_engine"
 
-    current_proxy = 0
-    proxies = [
-        "http://localhost:8118",
-    ]
+    def __init__(self, config_id=None, output_dst="local", kafka_server=None, kafka_topic=None, preview="no",
+                 preview_config=None, proxies=None, preview_proxies=None, cookies=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0',
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'same-origin',
-        'Sec-Fetch-User': '?1'
-    }
-
-    def get_proxy(self):
-        current_proxy_now = self.current_proxy % len(self.proxies)
-        self.current_proxy += 1
-        return self.proxies[current_proxy_now]
-
-    def __init__(self, config_id = None, output_dst = "local", kafka_server=None, kafka_topic=None, *args, **kwargs):
         self.conn: connection | None = None
         self.cursor: cursortype | None = None
         self.config: list[dict[str, Any]] = [{}]
-        self.cookies: dict[str, str] = {}
-        self.scraped_urls: list[str]= []
+        self.scraped_urls: list[str] = []
         self.output_dst: str = output_dst
         self.crawled_count: int = 0
         self.status_codes: dict[str, int] = {}
-        self.job_id: str | None = kwargs.get('_job')
+        self.job_id: str = kwargs.get('_job') or self._generate_job_id()
+        self.headers: dict[str, str] = {}
+        self.proxies: list[str] = self._decode_base64(proxies) if proxies else []
+        self.preview_proxies: list[str] = self._decode_base64(preview_proxies) if preview_proxies else []
+        self.cookies: dict[str, str] = self._decode_base64(cookies) if cookies else {}
+        self.preview: str = preview
+        self.data: tuple | None = None
+        self.items_collected: dict[str, Any] = {}
 
-        if self.job_id is None:
-            self.job_id = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
+        if self.preview == "yes":
+            self._initialize_preview(preview_config, preview_proxies)
+        else:
+            self._initialize_database(config_id)
 
-        super().__init__(*args, **kwargs)
+        if self.output_dst == "kafka":
+            self.KAFKA_BOOTSTRAP_SERVERS = self._decode_base64(kafka_server)
+            self.KAFKA_TOPIC = kafka_topic
 
-        dbHost = os.environ.get('DB_HOST', "103.47.227.82")
-        dbPort = os.environ.get('DB_PORT', "5432")
-        dbName = os.environ.get('DB_NAME', "config")
-        dbUser = os.environ.get('DB_USERNAME', "postgres")
-        dbPass = os.environ.get('DB_PASSWORD', "stagingpass")
-        if not dbHost or not dbPort or not dbName or not dbUser or not dbPass:
+    def _initialize_preview(self, preview_config, preview_proxies):
+        if preview_config is None or preview_proxies is None:
+            raise ValueError("`preview_config` and `preview_proxies` cannot be None for preview run")
+        self.config = self._decode_base64(preview_config)
+        self.proxies = self._decode_base64(preview_proxies)
+
+    def _initialize_database(self, config_id):
+        load_dotenv()
+        required_vars = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USERNAME', 'DB_PASSWORD']
+        db_config = {var: os.environ.get(var) for var in required_vars}
+        if None in db_config.values():
             raise ValueError("Missing required environment variables for database")
 
-        conn_str = f"dbname={dbName} user={dbUser} password={dbPass} host={dbHost} port={dbPort}"
+        conn_str = f"dbname={db_config['DB_NAME']} user={db_config['DB_USERNAME']} password={db_config['DB_PASSWORD']} host={db_config['DB_HOST']} port={db_config['DB_PORT']}"
+
         try:
             self.conn = psycopg2.connect(conn_str)
             self.cursor = self.conn.cursor()
-            self.cursor.execute("SELECT convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
-            data: bytes = self.cursor.fetchone()[0]
-            if data is None:
-                raise ValueError("Config not found")
-
-        except (Exception, psycopg2.DatabaseError) as error:
-            raise ConnectionError("Error while connecting to PostgreSQL", error)
-
-        try:
-            self.config = json.loads(data)
-            self.cookies = self.config.get('cookies', { })
-
-        except json.JSONDecodeError as e:
-            raise ValueError("Config not found")
+            self.cursor.execute("SELECT id, name, convert_from(data, 'UTF8') FROM configs WHERE id = %s", (config_id,))
+            self._load_config_data()
+        except psycopg2.DatabaseError as e:
+            raise ConnectionError(f"Error connecting to database: {e}")
         finally:
             if self.cursor:
                 self.cursor.close()
             if self.conn:
                 self.conn.close()
 
-        self.base_url: str = self.config.get('base_url', '')
+    def _load_config_data(self):
+        self.data = self.cursor.fetchone()
+        if not self.data:
+            raise ValueError("Configuration data not found")
+        self.config = json.loads(self.data[2])
+        self.base_url = self.config.get('base_url', '')
         if not self.base_url:
-            raise ValueError("No base URL configured")
+            raise ValueError("Base URL is required")
 
-        domain: str = urlparse(self.base_url.encode('utf-8')).netloc.decode('utf-8')
-        self.output_file: str = f"{domain}_output.json"
+        self.result_folder = self._prepare_result_folder()
+        self.output_file = self._prepare_output_file()
 
-        if os.path.exists(self.output_file):
-            with open(self.output_file, "r") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                self.scraped_urls = data
-            elif isinstance(data, dict):
-                self.scraped_urls = [item["url"] for item in data]
+        if self.output_file.exists():
+            try:
+                with open(self.output_file, "r") as f:
+                    json_content = f.read()
+                patterns_replacements = [
+                    (r'},\s*]', '}]'),
+                    (r'},\s*}', '}}'),
+                    (r',\s*]', ']'),
+                    (r',\s*}', '}'),
+                    (r'},\s*$', '}'),
+                    (r'^\[\s*,', '['),
+                ]
+                for pattern, replacement in patterns_replacements:
+                    json_content = re.sub(pattern, replacement, json_content)
+
+                json_content = json_content.strip()
+                if json_content.startswith("[,") or json_content == "[,\n":
+                    json_content = "["
+                if not json_content.endswith(']'):
+                    json_content += ']'
+
+                data = json.loads(json_content)
+            except json.JSONDecodeError as e:
+                if "Expecting ',' delimiter" in str(e):
+                    raise ValueError(f"Invalid JSON format: {e}")
+                else:
+                    raise
+            except Exception as e:
+                raise RuntimeError("Unknown error while reading output file")
+            if isinstance(data, dict):
+                self.scraped_urls = [item["link"] for item in data]
+            elif isinstance(data, list):
+                for sub_data in data:
+                    link = sub_data["link"] if isinstance(sub_data, dict) and "link" in sub_data else sub_data
+                    if link not in self.scraped_urls:
+                        self.scraped_urls.append(link)
             else:
                 raise ValueError("Invalid data format in output file")
         else:
             self.scraped_urls = []
 
-        self.items_collected: dict[str, Any] = {}
-        self.cookies = self.config.get('cookies', {})
+    def _prepare_result_folder(self):
+        folder = Path(f"results/{urlparse(self.base_url).netloc}")
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
 
-        if self.output_dst == "kafka":
-            self.KAFKA_BOOTSTRAP_SERVERS = kafka_server
-            self.KAFKA_TOPIC = kafka_topic
+    def _prepare_output_file(self):
+        prefix = "local" if self.output_dst == "local" else "kafka"
+        filename = f"{prefix}-{self.data[1]}-{self.data[0]}-result.json"
+        return self.result_folder / filename
+
+    def _decode_base64(self, data: str):
+        return json.loads(base64.b64decode(data).decode("utf-8"))
+
+    def _generate_job_id(self) -> str:
+        return ''.join(random.choices(string.ascii_lowercase + string.digits, k=24))
+
+    current_proxy: int = 0
+
+    def _get_proxy(self):
+        current_proxy_now = self.current_proxy % len(self.proxies)
+        self.current_proxy += 1
+        return self.proxies[current_proxy_now]
 
     def start_requests(self):
-        yield Request(url=self.config['base_url'], callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self.get_proxy()})
+        yield Request(url=self.config['base_url'] , callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy()})
 
-    def parse_structure(self, response: Response, structure):
-        url: str = urlparse(response.url).path
-        if url not in self.items_collected:
-            self.items_collected[url] = {"url": url}
+    def handle_data_extraction(self, response: Response, key: str, value: dict, tag: str, result: dict, base_url: str, parent_data: dict):
+        extracted_data = None
+        filtered_root_data = {}
+        value_type = value.get('type')
+        xpath_value = value.get('value')
+        if parent_data is not result or parent_data is not None:
+            if base_url in self.items_collected:
+                root_data = self.items_collected[base_url]
+                filtered_root_data = {
+                    key: value for key, value in root_data.items()
+                    if key not in ["global", "parent", "content_stat", "detail_feature"]
+                }
+        try:
+            if value_type in [None, 'str', 'int']:
+                raw_data = response.xpath(xpath_value).get()
+                extracted_data = int(raw_data) if value_type == 'int' and raw_data else raw_data
+            elif value_type == 'timestamp':
+                date = response.xpath(xpath_value).get()
+                extracted_data = int(dateparser.parse(date).timestamp() * 1000) if date else None
+            elif value_type == 'list':
+                extracted_data = response.xpath(xpath_value).getall()
+            elif value_type == "constraint":
+                extracted_data = xpath_value
+        except Exception as e:
+            self.logger.exception(f"Error extracting data for key {key}: {e}")
+            return result
 
+        if tag == 'root':
+            result[key] = extracted_data
+            if key not in ["global", "parent", "content_stat", "detail_feature"]:
+                result['parent'][key] = parent_data.get(key)
+        elif tag == 'global':
+            result['global'][key] = extracted_data
+            parent_data = parent_data.get('parent', {})
+            if parent_data == {} or key not in parent_data:
+                result['parent'][key] = extracted_data
+            else:
+                result['parent'][key] = parent_data.get(key)
+
+            if filtered_root_data == {} or key not in filtered_root_data:
+                result[key] = extracted_data
+            else:
+                result[key] = filtered_root_data[key]
+                result['parent'][key] = extracted_data
+        elif tag == 'parent':
+            if key not in filtered_root_data:
+                result[key] = extracted_data
+
+            global_parent_data = parent_data.get('global', {})
+            if key not in global_parent_data:
+                result['global'][key] = extracted_data
+            else:
+                result['global'][key] = global_parent_data.get(key)
+
+            if key not in result['parent']:
+                result['parent'][key] = extracted_data
+            else:
+                result['parent'][key] = parent_data.get('parent', {}).get(key)
+
+        if parent_data is not None and "_loop" not in value.keys():
+            try:
+                self.items_collected.pop(base_url)
+            except KeyError:
+                pass
+        return result
+
+    def handle_loop(self, response: Response, loop_structure: dict, base_url: str, parent_data: dict):
+        loop_elements = response.xpath(loop_structure["_element"])
+        tag = loop_structure.get("_tag", "root")
+        for idx, element in enumerate(loop_elements):
+            loop_result = {"link": base_url, "global": {}, "parent": {}}
+
+            for sub_key, sub_value in loop_structure.items():
+                if sub_key in ["_element", "_key", "_tag", "_pagination"]:
+                    continue
+
+                if isinstance(sub_value, dict) and {"value", "type"}.issubset(sub_value.keys()):
+                    if parent_data is not loop_result:
+                        if base_url in self.items_collected:
+                            filtered_root_data = self.items_collected[base_url]
+                            parent_data.update(filtered_root_data)
+
+                    loop_result = self.handle_data_extraction(element, sub_key, sub_value, tag, loop_result, base_url, parent_data)
+                elif sub_key == "_loop":
+                    yield from self.handle_loop(element, sub_value, base_url, loop_result)
+
+            try:
+                if loop_result['content'] == loop_result["parent"]['content']:
+                    loop_result['parent'] = loop_result["global"].copy()
+            except KeyError:
+                pass
+            yield loop_result
+
+        if parent_data is not None and "_loop" not in loop_structure.keys():
+            try:
+                self.items_collected.pop(base_url)
+            except KeyError:
+                pass
+    def parse_structure(self, response: Response, structure, nested=False, url=None, loop_data=None, caller_key=None):
+        if url is None:
+            url: str = response.url
+
+        result = {"link": url, "global": {}, "parent": {}}
         for key, value in structure.items():
             if key == "_element":
                 continue
@@ -121,104 +262,38 @@ class GeneralEngineSpider(Spider):
                 list_xpath: str = value.get("_element")
                 if list_xpath:
                     for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
-                        self.log(f"Found link: {link_url}")
-                        yield response.follow(link_url, self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self.get_proxy()})
+                        self.logger.info(f"Found link: {link_url}")
+                        yield response.follow(link_url, self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self._get_proxy()})
 
             elif "_loop" in key:
-                loop_elements: list[Response] = response.xpath(value["_element"])
-                loop_keys: list[str] = [k for k in value.keys() if k not in ["_element", "_key", "_pagination"]]
-                result: list[dict[str, Any]] = []
+                if "_element" not in value:
+                    raise ValueError("Missing '_element' key in loop configuration.")
+                yield from self.handle_loop(response, value, url, self.items_collected[url] or result)
 
-                for element in loop_elements:
-                    data: dict[str, Any] = {}
-
-                    for loop_key in loop_keys:
-                        if isinstance(loop_key, str) and isinstance(value[loop_key], str):
-                            extracted_data: list[str] | str = [item.strip() for item in element.xpath(value[loop_key]).getall() if item.strip()]
-                            if len(extracted_data) == 1:
-                                extracted_data = element.xpath(value[loop_key]).get()
-                            # if loop_key.startswith(('.', '/')) and (custom_key := response.xpath(loop_key).get()):
-                            #     if custom_key:
-                            #         data[custom_key] = extracted_data
-                            else:
-                                if extracted_data:
-                                    data[loop_key.rstrip("*")] = extracted_data
-                                elif not loop_key.endswith("*"):
-                                    self.log(f"Required key 1 '{loop_key}' not found in {url}")
-
-                        elif isinstance(value[loop_key], dict):
-                            sub_loop_data: list[dict[str, str]] = []
-                            sub_elements: list[Response] = element.xpath(value[loop_key]["_element"])
-                            for sub_element in sub_elements:
-                                sub_data: dict[str, str] = {}
-                                for sub_key, sub_value in value[loop_key].items():
-                                    if sub_key in ["_element", "_key", "_pagination"]:
-                                        continue
-                                    extracted_sub_data: list[str] | str = [item.strip() for item in sub_element.xpath(sub_value).getall() if item.strip()]
-                                    if len(extracted_sub_data) == 1:
-                                        extracted_sub_data = sub_element.xpath(sub_value).get()
-                                    if extracted_sub_data:
-                                        sub_data[sub_key.rstrip("*")] = extracted_sub_data
-                                if sub_data:
-                                    sub_loop_data.append(sub_data)
-
-                                data[value[loop_key].get("_key", "nested_loop")] = sub_loop_data
-
-                    if data:
-                        result.append(data)
-                    try:
-                        self.items_collected[url][value.get("_key", "loop_data")] = result
-                    except KeyError:
-                        pass
-
-            if "_pagination" in value:
-                next_page = response.xpath(value["_pagination"]).get()
+            if "_pagination" in key:
+                next_page: str = response.xpath(value).get()
                 if next_page:
-                    next_page_url = response.urljoin(next_page)
-                    self.log(f"Following pagination to: {next_page_url}")
-                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.headers, cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self.get_proxy()})
-
-            if isinstance(value, dict):
-                yield from self.parse_structure(response, value)
-
-            elif isinstance(value, str) and key != "_pagination":
-                extracted_data: list[str] = [item.strip() for item in response.xpath(value).getall() if item.strip()]
-                if len(extracted_data) == 1:
-                    extracted_data = response.xpath(value).get()
-                if extracted_data:
-                    try:
-                        self.items_collected[url][key if key[len(key) - 1] != "*" else key[:len(key) - 1]] = extracted_data
-                    except KeyError:
-                        pass
-                elif not key.endswith("*") and key != "_pagination" and value != "_pagination":
-                    self.log(f"Required key 2 '{key}' not found in {url}")
-            try:
-                collected_data: dict[str, Any] = self.items_collected[url]
-                if self._is_data_complete(collected_data, structure, response.url):
-                    if any(key != "url" for key in collected_data.keys()):
-                        yield self.items_collected.pop(url)
+                    if response.url == f"{urlparse(url).scheme}://{urlparse(url).netloc}":
+                        if next_page.startswith('?'):
+                            next_page_url = response.urljoin("/" + next_page)
+                        else:
+                            next_page_url = response.urljoin(next_page)
                     else:
-                        self.items_collected.pop(url)
-            except KeyError:
-                pass
-            except Exception as e:
-                self.logger.exception(e)
+                        next_page_url = response.urljoin(next_page)
+                    self.logger.info(f"Following pagination to: {next_page_url}")
+                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self._get_proxy()})
 
-    def _is_data_complete(self, collected_data, structure, url):
-        for key, value in structure.items():
-            if key.startswith(("_", "@")):
-                continue
-
-            is_optional: str = key.endswith("*")
-            key_base: str = key.rstrip("*") if is_optional else key
-
-            if key_base not in collected_data or collected_data[key_base] is None:
-                if not is_optional:
-                    self.log(f"Required key 3 '{key_base}' not in collected_data for url {url}")
-                return False
+            if isinstance(value, dict) and {'value', 'type'}.issubset(value.keys()) and key != "_loop" and caller_key != "_loop":
+                tag = structure.get("_tag", None)
+                result = self.handle_data_extraction(response=response, key=key, value=value, tag=tag, result=result, base_url=response.url, parent_data=result)
+                self.items_collected[url] = result
 
             if isinstance(value, dict):
-                if not self._is_data_complete(collected_data.get(key_base, {}), value, url):
-                    return False
+                if not nested:
+                    yield from self.parse_structure(response, value, nested=True, caller_key=key)
 
-        return True
+        if result != {"link": url, "global": {}, "parent": {}}:
+            try:
+                yield result
+            except Exception as e:
+                self.logger.exception(f"Error yielding result: {e}")

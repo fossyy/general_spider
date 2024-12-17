@@ -27,3 +27,5 @@ project.egg-info
 logs
 *.old
 .idea/
+.env
+.sql

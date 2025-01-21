@@ -156,6 +156,8 @@ class GeneralEngineSpider(Spider):
         filtered_root_data = {}
         value_type = value.get('type')
         xpath_value = value.get('value')
+        raw_timestamp = None
+
         if parent_data is not result or parent_data is not None:
             if base_url in self.items_collected:
                 root_data = self.items_collected[base_url]
@@ -168,8 +170,8 @@ class GeneralEngineSpider(Spider):
                 raw_data = response.xpath(xpath_value).get()
                 extracted_data = int(raw_data) if value_type == 'int' and raw_data else raw_data
             elif value_type == 'timestamp':
-                date = response.xpath(xpath_value).get()
-                extracted_data = int(dateparser.parse(date).timestamp() * 1000) if date else None
+                raw_timestamp = response.xpath(xpath_value).get()
+                extracted_data = int(dateparser.parse(raw_timestamp).timestamp() * 1000) if raw_timestamp else None
             elif value_type == 'list':
                 extracted_data = response.xpath(xpath_value).getall()
             elif value_type == "constraint":
@@ -180,10 +182,14 @@ class GeneralEngineSpider(Spider):
 
         if tag == 'root':
             result[key] = extracted_data
+            if value_type == 'timestamp':
+                result[f"raw_timestamp"] = raw_timestamp
             if key not in ["global", "parent", "content_stat", "detail_feature"]:
                 result['parent'][key] = parent_data.get(key)
         elif tag == 'global':
             result['global'][key] = extracted_data
+            if value_type == 'timestamp':
+                result['global'][f"raw_timestamp"] = raw_timestamp
             parent_data = parent_data.get('parent', {})
             if parent_data == {} or key not in parent_data:
                 result['parent'][key] = extracted_data
@@ -198,10 +204,14 @@ class GeneralEngineSpider(Spider):
         elif tag == 'parent':
             if key not in filtered_root_data:
                 result[key] = extracted_data
+                if value_type == 'timestamp':
+                    result[f"raw_timestamp"] = raw_timestamp
 
             global_parent_data = parent_data.get('global', {})
             if key not in global_parent_data:
                 result['global'][key] = extracted_data
+                if value_type == 'timestamp':
+                    result['global'][f"raw_timestamp"] = raw_timestamp
             else:
                 result['global'][key] = global_parent_data.get(key)
 

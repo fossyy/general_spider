@@ -201,6 +201,8 @@ class GeneralSenderPipeline:
                     most_common_type = Counter(file_types).most_common(1)[0][0] if file_types else "text"
                     mapping_template[key] = value
                     mapping_template["media_type"] = most_common_type
+                elif key == "user_id":
+                    mapping_template["user_id"] = hashlib.md5(value.encode("utf-8")).hexdigest()
                 else:
                     mapping_template[key] = value
             else:

@@ -11,7 +11,6 @@ from logging.handlers import RotatingFileHandler
 from scrapy.utils.log import configure_logging
 from pathlib import Path
 
-
 class GeneralSenderPipeline:
     mapping = {
         "media_thumbnail": "",
@@ -19,6 +18,7 @@ class GeneralSenderPipeline:
         "follower_count": 0,
         "sentiment": "",
         "timestamp": 0,
+        "raw_timestamp": "",
         "lang": "en",
         "emotion": "",
         "user_location": [],
@@ -66,6 +66,7 @@ class GeneralSenderPipeline:
             "follower_count": 0,
             "engagement": 0,
             "timestamp": 0,
+            "raw_timestamp": "",
             "id": "",
             "user_id": "",
             "media_url": [],
@@ -85,6 +86,7 @@ class GeneralSenderPipeline:
             "follower_count": 0,
             "engagement": 0,
             "timestamp": 0,
+            "raw_timestamp": "",
             "id": "",
             "user_id": "",
             "media_url": [],

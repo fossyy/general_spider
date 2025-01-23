@@ -2,6 +2,7 @@ import hashlib
 import json, psycopg2, os, random, string, base64, re, dateparser
 import time
 
+from scrapy.exceptions import IgnoreRequest
 from typing import Any
 from scrapy import Request, Spider
 from scrapy.http import Response
@@ -149,13 +150,15 @@ class GeneralEngineSpider(Spider):
         return self.proxies[current_proxy_now]
 
     def start_requests(self):
-        yield Request(url=self.config['base_url'] , callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy()})
+        yield Request(url=self.config['base_url'] , callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": self.config["structure"]}, meta={'proxy': self._get_proxy(), 'key': 'structure'})
 
     def handle_data_extraction(self, response: Response, key: str, value: dict, tag: str, result: dict, base_url: str, parent_data: dict):
         extracted_data = None
         filtered_root_data = {}
         value_type = value.get('type')
         xpath_value = value.get('value')
+        raw_timestamp = None
+
         if parent_data is not result or parent_data is not None:
             if base_url in self.items_collected:
                 root_data = self.items_collected[base_url]
@@ -168,8 +171,8 @@ class GeneralEngineSpider(Spider):
                 raw_data = response.xpath(xpath_value).get()
                 extracted_data = int(raw_data) if value_type == 'int' and raw_data else raw_data
             elif value_type == 'timestamp':
-                date = response.xpath(xpath_value).get()
-                extracted_data = int(dateparser.parse(date).timestamp() * 1000) if date else None
+                raw_timestamp = response.xpath(xpath_value).get()
+                extracted_data = int(dateparser.parse(raw_timestamp).timestamp() * 1000) if raw_timestamp else None
             elif value_type == 'list':
                 extracted_data = response.xpath(xpath_value).getall()
             elif value_type == "constraint":
@@ -180,35 +183,46 @@ class GeneralEngineSpider(Spider):
 
         if tag == 'root':
             result[key] = extracted_data
-            if key not in ["global", "parent", "content_stat", "detail_feature"]:
-                result['parent'][key] = parent_data.get(key)
+            if value_type == 'timestamp':
+                result[f"raw_timestamp"] = raw_timestamp
+            # if key not in ["global", "parent", "content_stat", "detail_feature"]:
+            #     result['parent'][key] = parent_data.get(key)
         elif tag == 'global':
             result['global'][key] = extracted_data
+            if value_type == 'timestamp':
+                result['global'][f"raw_timestamp"] = raw_timestamp
             parent_data = parent_data.get('parent', {})
-            if parent_data == {} or key not in parent_data:
-                result['parent'][key] = extracted_data
-            else:
-                result['parent'][key] = parent_data.get(key)
+            # if parent_data == {} or key not in parent_data:
+            #     result['parent'][key] = extracted_data
+            # else:
+            #     result['parent'][key] = parent_data.get(key)
 
             if filtered_root_data == {} or key not in filtered_root_data:
                 result[key] = extracted_data
             else:
                 result[key] = filtered_root_data[key]
-                result['parent'][key] = extracted_data
+                # result['parent'][key] = extracted_data
         elif tag == 'parent':
+            # Cek Bagian root
             if key not in filtered_root_data:
                 result[key] = extracted_data
+                if value_type == 'timestamp':
+                    result[f"raw_timestamp"] = raw_timestamp
 
+            # Cek bagian global
             global_parent_data = parent_data.get('global', {})
             if key not in global_parent_data:
                 result['global'][key] = extracted_data
+                if value_type == 'timestamp':
+                    result['global'][f"raw_timestamp"] = raw_timestamp
             else:
                 result['global'][key] = global_parent_data.get(key)
 
-            if key not in result['parent']:
-                result['parent'][key] = extracted_data
-            else:
-                result['parent'][key] = parent_data.get('parent', {}).get(key)
+            # bagian parent
+            # if key not in result['parent']:
+            result['parent'][key] = extracted_data
+            # else:
+            #     result['parent'][key] = parent_data.get('parent', {}).get(key)
 
         if parent_data is not None and "_loop" not in value.keys():
             try:
@@ -263,7 +277,7 @@ class GeneralEngineSpider(Spider):
                 if list_xpath:
                     for link_url in map(response.urljoin, response.xpath(list_xpath).getall()):
                         self.logger.info(f"Found link: {link_url}")
-                        yield response.follow(link_url, self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self._get_proxy()})
+                        yield response.follow(link_url, self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": value}, meta={'proxy': self._get_proxy(), 'key': key})
 
             elif "_loop" in key:
                 if "_element" not in value:
@@ -281,7 +295,7 @@ class GeneralEngineSpider(Spider):
                     else:
                         next_page_url = response.urljoin(next_page)
                     self.logger.info(f"Following pagination to: {next_page_url}")
-                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self._get_proxy()})
+                    yield response.follow(url=next_page_url, callback=self.parse_structure, headers=self.config.get('headers', {}), cookies=self.cookies, cb_kwargs={"structure": structure}, meta={'proxy': self._get_proxy(), 'key': key})
 
             if isinstance(value, dict) and {'value', 'type'}.issubset(value.keys()) and key != "_loop" and caller_key != "_loop":
                 tag = structure.get("_tag", None)

@@ -11,7 +11,6 @@ from logging.handlers import RotatingFileHandler
 from scrapy.utils.log import configure_logging
 from pathlib import Path
 
-
 class GeneralSenderPipeline:
     mapping = {
         "media_thumbnail": "",

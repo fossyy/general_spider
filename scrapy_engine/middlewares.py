@@ -11,6 +11,7 @@ class ScrapyEngineSpiderMiddleware:
         self.last_logged = datetime.now()
 
     def process_request(self, request, spider):
+        caller_key = request.meta.get("key", None)
         if self.scraped_urls == [] and self.first_item:
             self.scraped_urls = getattr(spider, "scraped_urls", None)
             self.base_url = getattr(spider, "base_url", None)
@@ -20,7 +21,8 @@ class ScrapyEngineSpiderMiddleware:
             spider.logger.info(f"Skipping already scraped URL: {request.url}")
             raise IgnoreRequest(f"URL {request.url} already scraped.")
         else:
-            self.scraped_urls.append(request.url)
+            if caller_key != "_pagination":
+                self.scraped_urls.append(request.url)
             return None
 
     def process_response(self, request, response: Response, spider):

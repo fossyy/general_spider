@@ -219,11 +219,20 @@ class GeneralEngineSpider(Spider):
                 result['global'][key] = global_parent_data.get(key)
 
             # bagian parent
-            # if key not in result['parent']:
-            result['parent'][key] = extracted_data
-            # else:
-            #     result['parent'][key] = parent_data.get('parent', {}).get(key)
+            if key not in result['parent']:
+                result['parent'][key] = extracted_data
+            else:
+                result['parent'][key] = parent_data.get('parent', {}).get(key)
 
+            if value_type == 'timestamp':
+                result['parent'][f"raw_timestamp"] = raw_timestamp
+        else:
+            try:
+                result[tag][key] = extracted_data
+            except KeyError:
+                if tag not in result:
+                    result[tag] = {}
+                result[tag][key] = extracted_data
         if parent_data is not None and "_loop" not in value.keys():
             try:
                 self.items_collected.pop(base_url)
